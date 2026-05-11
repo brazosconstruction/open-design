@@ -116,7 +116,7 @@ created: '2026-05-09'
 
 ### Design Decisions
 
-- Decision: use Tailwind CSS v4 in `apps/web`, with `tailwindcss`, `@tailwindcss/postcss`, and `postcss`, configured through PostCSS, and import only `@import "tailwindcss/theme";` plus `@import "tailwindcss/utilities";` in the existing global CSS entry. This keeps Tailwind Preflight out of the foundation slice so current base element margins, list markers, and app-specific reset behavior remain controlled by `index.css`. Source: `apps/web/package.json:23-50`; `apps/web/app/layout.tsx:1-4`; `https://tailwindcss.com/docs/guides/nextjs`; `https://tailwindcss.com/docs/preflight`
+- Decision: use Tailwind CSS v4 in `apps/web`, with `tailwindcss`, `@tailwindcss/postcss`, and `postcss`, configured through PostCSS, and import only `@import "tailwindcss/theme";` plus `@import "tailwindcss/utilities";` in the existing global CSS entry. This keeps Tailwind Preflight out of the foundation slice so current base element margins, list markers, and app-specific reset behavior remain controlled by `index.css`; add the narrow local border-style reset from Tailwind's Preflight contract (`*, ::before, ::after, ::backdrop, ::file-selector-button { border: 0 solid; }`) so `border border-*` utilities render solid borders without importing the full Preflight reset. Source: `apps/web/package.json:23-50`; `apps/web/app/layout.tsx:1-4`; `https://tailwindcss.com/docs/guides/nextjs`; `https://tailwindcss.com/docs/preflight#border-styles-are-reset`
 - Decision: define Tailwind theme values through CSS `@theme` because v4 converts `--color-*` theme variables into utilities such as `bg-*`, `text-*`, and `border-*`. Source: `https://tailwindcss.com/docs/theme`; `https://tailwindcss.com/docs/customizing-colors`
 - Decision: map Tailwind color tokens to existing runtime CSS variables, such as `--color-bg: var(--bg)`, `--color-panel: var(--bg-panel)`, `--color-accent: var(--accent)`, `--color-danger: var(--red)`, and `--color-success: var(--green)`. Source: `apps/web/src/index.css:6-63`; `apps/web/src/state/appearance.ts:17-52`; `specs/change/20260509-token-first-tailwind/token.md`
 - Decision: clear Tailwind's default color namespace with `--color-*: initial` before declaring project colors, so project classes express the Open Design token set. Source: `https://tailwindcss.com/docs/customizing-colors`; `apps/web/src/index.css:6-49`
@@ -149,7 +149,7 @@ created: '2026-05-09'
 
 - `apps/web/package.json` - add Tailwind/PostCSS dependencies at the web package boundary.
 - `apps/web/postcss.config.mjs` - configure the Tailwind v4 PostCSS plugin; this file needs an exact-path allowlist entry in the residual JavaScript guard because the PostCSS config loader consumes a `.mjs` config entry.
-- `apps/web/src/index.css` - retain global tokens/base styles and add Tailwind import/theme aliases.
+- `apps/web/src/index.css` - retain global tokens/base styles, add Tailwind import/theme aliases, and add the narrow local border-style reset needed by Tailwind border utilities when Preflight is omitted.
 - `specs/change/20260509-token-first-tailwind/token.md` - record Tailwind color/radius/shadow/font token naming, mapping to existing CSS variables, and the design decision to use native Tailwind utilities for spacing/type.
 - `apps/web/src/**/*.tsx` - fully replace migratable global CSS classes with token-first Tailwind classes.
 - `scripts/guard.ts` - add the PostCSS config residual JavaScript allowlist and style policy checks to the existing repo guard.
@@ -195,12 +195,12 @@ Goal: add Tailwind v4 infrastructure, expose Open Design tokens as Tailwind util
   - [ ] Substep 1.1 Implement: Add Tailwind v4/PostCSS dependencies to `apps/web/package.json`.
   - [ ] Substep 1.2 Implement: Add a web-local PostCSS config for `@tailwindcss/postcss`.
   - [ ] Substep 1.3 Implement: Add `apps/web/postcss.config.mjs` to the exact residual JavaScript allowlist in `scripts/guard.ts`, with a comment explaining that the PostCSS/Tailwind config entry needs the `.mjs` compatibility format, keeping `pnpm guard` coverage for planned config files.
-  - [ ] Substep 1.4 Implement: Import Tailwind theme and utilities layers in `apps/web/src/index.css` with `@import "tailwindcss/theme";` and `@import "tailwindcss/utilities";`, while preserving the existing global entry behavior and excluding Preflight from the foundation slice.
+  - [ ] Substep 1.4 Implement: Import Tailwind theme and utilities layers in `apps/web/src/index.css` with `@import "tailwindcss/theme";` and `@import "tailwindcss/utilities";`, while preserving the existing global entry behavior and excluding Preflight from the foundation slice. Add the narrow local border-style reset `*, ::before, ::after, ::backdrop, ::file-selector-button { border: 0 solid; }` so Tailwind `border` width utilities combine with project `border-*` color utilities without requiring `border-solid` on every migrated element.
   - [ ] Substep 1.5 Verify: Run `pnpm install`.
   - [ ] Substep 1.6 Verify: Run `pnpm guard` and confirm the PostCSS config allowlist works.
   - [ ] Substep 1.7 Verify: Run `pnpm --filter @open-design/web build`.
 - [ ] Step 2: Expose Open Design tokens as Tailwind utilities
-  - [ ] Substep 2.1 Implement: Add CSS-first `@theme` aliases for colors, core semantic status, selection/inspect overlays, radius, shadow, font tokens, and exact existing UI text-size aliases; use native Tailwind utilities for spacing and standard typography scale.
+  - [ ] Substep 2.1 Implement: Add CSS-first `@theme` aliases for colors, core semantic status, selection/inspect overlays, radius, shadow, font tokens, and exact existing UI text-size aliases; use native Tailwind utilities for spacing and standard typography scale. Confirm token border examples such as `border border-border` render against the local border-style reset when Preflight is omitted.
   - [ ] Substep 2.2 Implement: Clear default Tailwind colors and declare the project-approved color namespace.
   - [ ] Substep 2.3 Implement: Document the token class vocabulary near the theme block.
   - [ ] Substep 2.4 Verify: Confirm light, dark, system, and custom accent modes all resolve through the same CSS variables.
