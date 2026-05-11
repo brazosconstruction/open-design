@@ -57,6 +57,7 @@ import type {
   ProjectFile,
 } from '../types';
 import { Icon } from './Icon';
+import { Toast } from './Toast';
 import {
   buildBoardCommentAttachments,
   commentsToAttachments,
@@ -3175,6 +3176,7 @@ function HtmlViewer({
   const [inspectError, setInspectError] = useState<string | null>(null);
   const [queuedBoardNotes, setQueuedBoardNotes] = useState<string[]>([]);
   const [sendingBoardBatch, setSendingBoardBatch] = useState(false);
+  const [commentSavedToast, setCommentSavedToast] = useState<string | null>(null);
   const [selectedSideCommentIds, setSelectedSideCommentIds] = useState<Set<string>>(() => new Set());
   const [strokePoints, setStrokePoints] = useState<StrokePoint[]>([]);
   const previewStateKey = `${projectId}:${file.name}`;
@@ -4317,13 +4319,15 @@ function HtmlViewer({
 
   async function savePersistentComment() {
     if (!activeCommentTarget || !commentDraft.trim() || !onSavePreviewComment) return;
+    const isFreePin = activeCommentTarget.elementId.startsWith('pin-');
     const saved = await onSavePreviewComment(
       targetFromSnapshot(activeCommentTarget),
       commentDraft.trim(),
       false,
     );
     if (saved) {
-      setCommentDraft('');
+      clearBoardComposer();
+      setCommentSavedToast(isFreePin ? 'Pin saved' : 'Comment saved');
     }
   }
 
@@ -4919,6 +4923,15 @@ function HtmlViewer({
                   setQueuedBoardNotes([]);
                 }}
               />
+            ) : null}
+            {commentSavedToast ? (
+              <div className="comment-toast-anchor">
+                <Toast
+                  message={commentSavedToast}
+                  ttlMs={2200}
+                  onDismiss={() => setCommentSavedToast(null)}
+                />
+              </div>
             ) : null}
             {boardMode && activeCommentTarget ? (
               <BoardComposerPopover
