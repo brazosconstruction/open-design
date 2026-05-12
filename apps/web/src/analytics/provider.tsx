@@ -20,6 +20,7 @@ import {
 } from '@open-design/contracts/analytics';
 import {
   applyConsent,
+  applyIdentity,
   capture,
   getAnalyticsClient,
   getResolvedAnonymousId,
@@ -42,6 +43,12 @@ interface AnalyticsContextValue {
   // this from a useEffect that watches `config.telemetry?.metrics` so a
   // Privacy toggle takes effect immediately, not on next reload.
   setConsent: (granted: boolean) => void;
+  // Switch PostHog's distinct_id to the new installationId after a
+  // Delete-my-data rotation. App.tsx watches `config.installationId` and
+  // calls this whenever the daemon rotates it; PostHog's localStorage
+  // state is reset() then identify()'d to the new id so the next event
+  // batch is fully decoupled from the deleted identity.
+  setIdentity: (installationId: string | null) => void;
   anonymousId: string;
   sessionId: string;
   newRequestId: () => string;
@@ -224,6 +231,12 @@ export function AnalyticsProvider({ children }: { children: ReactNode }) {
     () => ({
       track,
       setConsent: (granted: boolean) => applyConsent(granted),
+      setIdentity: (installationId: string | null) => {
+        applyIdentity(installationId);
+        // Keep the fetch wrapper's header in sync so daemon-side captures
+        // start using the new id immediately, not after the next reload.
+        if (installationId) setResolvedAnonId(installationId);
+      },
       anonymousId: identity.anonymousId,
       sessionId: identity.sessionId,
       newRequestId: () => crypto.randomUUID(),
@@ -243,6 +256,7 @@ export function useAnalytics(): AnalyticsContextValue {
     return {
       track: () => undefined,
       setConsent: () => undefined,
+      setIdentity: () => undefined,
       anonymousId: 'unmounted',
       sessionId: 'unmounted',
       newRequestId: () => crypto.randomUUID(),

@@ -129,6 +129,13 @@ export async function getAnalyticsClient(
 // capture() calls but also autocapture, $pageview, $pageleave,
 // $exception, web vitals, and dead clicks. One toggle covers every
 // PostHog code path.
+//
+// On opt-out we ALSO call `posthog.reset()` to clear the persisted
+// `ph_*_posthog` localStorage entry. Without this, the SDK keeps the
+// old distinct_id; if the user later clicks Delete my data (which
+// rotates installationId via the daemon) and toggles metrics back on,
+// posthog-js would still think the user is the old id and stitch the
+// new session to the deleted identity. reset() prevents that.
 export function applyConsent(consentGranted: boolean): void {
   if (!client) return;
   try {
@@ -136,9 +143,29 @@ export function applyConsent(consentGranted: boolean): void {
       client.opt_in_capturing();
     } else {
       client.opt_out_capturing();
+      client.reset();
+      resolvedAnonymousId = null;
     }
   } catch {
     // best-effort — capture should never throw out of this path.
+  }
+}
+
+// Called from the AnalyticsProvider when `config.installationId` rotates
+// (Delete my data). posthog-js's `bootstrap.distinctID` only takes
+// effect on first init; once the client is alive, identify() is the
+// only way to switch identities. We pair it with reset() first so any
+// $device_id stored under the OLD installation is wiped — the new
+// session is fully decoupled from the deleted one.
+export function applyIdentity(installationId: string | null): void {
+  if (!client || !installationId) return;
+  if (resolvedAnonymousId === installationId) return;
+  try {
+    client.reset();
+    client.identify(installationId);
+    resolvedAnonymousId = installationId;
+  } catch {
+    // best-effort — never propagate.
   }
 }
 

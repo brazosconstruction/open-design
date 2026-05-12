@@ -228,6 +228,17 @@ export function App() {
     analytics.setConsent(config.telemetry?.metrics === true);
   }, [analytics.setConsent, config.telemetry?.metrics]);
 
+  // Sync PostHog's distinct_id with the anonymous installationId, both on
+  // first opt-in (when the daemon stamps a fresh id) and on Delete-my-data
+  // rotation (when PrivacySection.tsx generates a new one). posthog-js
+  // caches the previous id in localStorage; identify() alone would stitch
+  // the two ids together, so applyIdentity() does reset() first to
+  // guarantee the new session is fully decoupled from the deleted one.
+  useEffect(() => {
+    if (config.telemetry?.metrics !== true) return;
+    analytics.setIdentity(config.installationId ?? null);
+  }, [analytics.setIdentity, config.installationId, config.telemetry?.metrics]);
+
   // Sync theme preference to the <html> element so CSS variables pick it up.
   // useLayoutEffect (vs useEffect) fires before the browser paints, so a
   // live theme switch in Settings applies atomically — no 1-frame flash of
