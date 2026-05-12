@@ -2,7 +2,8 @@
 
 import { cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ProjectView, resolveSucceededRunStatus } from '../../src/components/ProjectView';
+import { ProjectView, finalizeActiveAssistantMessagesOnStop, resolveSucceededRunStatus } from '../../src/components/ProjectView';
+import type { ChatMessage } from '../../src/types';
 
 const listConversations = vi.fn();
 const listMessages = vi.fn();
@@ -173,6 +174,39 @@ describe('ProjectView daemon cleanup', () => {
     expect(resolveSucceededRunStatus(undefined)).toBe('succeeded');
     expect(resolveSucceededRunStatus('failed')).toBe('failed');
     expect(resolveSucceededRunStatus('canceled')).toBe('canceled');
+  });
+
+  it('only finalizes active assistant runs when Stop is clicked', () => {
+    const stoppedAt = 2_000;
+    const completedWithoutEndedAt: ChatMessage = {
+      id: 'completed',
+      role: 'assistant',
+      content: 'done',
+      createdAt: 100,
+      startedAt: 100,
+      runStatus: 'succeeded',
+    };
+    const active: ChatMessage = {
+      id: 'active',
+      role: 'assistant',
+      content: 'working',
+      createdAt: 500,
+      startedAt: 500,
+      runStatus: 'running',
+    };
+
+    const result = finalizeActiveAssistantMessagesOnStop(
+      [completedWithoutEndedAt, active],
+      stoppedAt,
+    );
+
+    expect(result.messages[0]).toBe(completedWithoutEndedAt);
+    expect(result.messages[1]).toEqual({
+      ...active,
+      runStatus: 'canceled',
+      endedAt: stoppedAt,
+    });
+    expect(result.finalized).toEqual([result.messages[1]]);
   });
 
   it('marks a recoverable daemon run as failed when the run status can no longer be fetched', async () => {

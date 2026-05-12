@@ -238,7 +238,7 @@ function AssistantFooter({
   hasEmptyResponse: boolean;
 }) {
   const t = useT();
-  const elapsed = useLiveElapsed(streaming, startedAt, endedAt);
+  const elapsed = useLiveElapsed(streaming, startedAt, endedAt, usage?.durationMs);
   if (!streaming && !elapsed && !usage && !hasUnfinishedTodos && !hasEmptyResponse) return null;
   return (
     <div
@@ -881,7 +881,8 @@ function splitSystemReminders(input: string): ProseSegment[] {
 function useLiveElapsed(
   streaming: boolean,
   startedAt: number | undefined,
-  endedAt: number | undefined
+  endedAt: number | undefined,
+  fixedDurationMs: number | undefined,
 ): string {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -889,9 +890,16 @@ function useLiveElapsed(
     const id = window.setInterval(() => setNow(Date.now()), 200);
     return () => window.clearInterval(id);
   }, [streaming]);
-  if (!startedAt) return "";
-  const end = streaming ? now : endedAt ?? now;
-  const ms = Math.max(0, end - startedAt);
+  if (!streaming && endedAt === undefined && typeof fixedDurationMs === "number") {
+    return formatElapsedMs(fixedDurationMs);
+  }
+  if (!startedAt || (!streaming && endedAt === undefined)) return "";
+  const end = streaming ? now : endedAt;
+  const ms = Math.max(0, (end ?? now) - startedAt);
+  return formatElapsedMs(ms);
+}
+
+function formatElapsedMs(ms: number): string {
   const s = ms / 1000;
   if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
   const m = Math.floor(s / 60);

@@ -1,4 +1,4 @@
-import type { ChatMessage } from './chat.js';
+import type { ChatMessage, ChatRunStatus } from './chat.js';
 
 export type ProjectKind =
   | 'prototype'
@@ -127,6 +127,12 @@ export interface Conversation {
   title: string | null;
   createdAt: number;
   updatedAt: number;
+  latestRun?: {
+    status: ChatRunStatus;
+    startedAt?: number;
+    endedAt?: number;
+    durationMs?: number;
+  };
 }
 
 export interface CreateProjectRequest {

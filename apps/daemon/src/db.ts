@@ -663,6 +663,7 @@ export function listConversations(db: SqliteDb, projectId: string) {
       title: r.title ?? null,
       createdAt: Number(r.createdAt),
       updatedAt: Number(r.updatedAt),
+      latestRun: latestConversationRunSummary(db, r.id) ?? undefined,
     }));
 }
 
@@ -681,7 +682,64 @@ export function getConversation(db: SqliteDb, id: string) {
     title: r.title ?? null,
     createdAt: Number(r.createdAt),
     updatedAt: Number(r.updatedAt),
+    latestRun: latestConversationRunSummary(db, r.id) ?? undefined,
   };
+}
+
+function latestConversationRunSummary(db: SqliteDb, conversationId: string) {
+  const row = db
+    .prepare(
+      `SELECT run_status AS runStatus,
+              started_at AS startedAt,
+              ended_at AS endedAt,
+              events_json AS eventsJson
+         FROM messages
+        WHERE conversation_id = ?
+          AND role = 'assistant'
+          AND run_status IS NOT NULL
+        ORDER BY COALESCE(ended_at, started_at, created_at) DESC
+        LIMIT 1`,
+    )
+    .get(conversationId) as DbRow | undefined;
+  if (!row || typeof row.runStatus !== 'string') return null;
+  const startedAt = row.startedAt == null ? undefined : Number(row.startedAt);
+  const endedAt = row.endedAt == null ? undefined : Number(row.endedAt);
+  const usageDurationMs = latestUsageDurationMs(row.eventsJson);
+  const durationMs =
+    Number.isFinite(startedAt) && Number.isFinite(endedAt)
+      ? Math.max(0, (endedAt as number) - (startedAt as number))
+      : usageDurationMs;
+  return {
+    status: row.runStatus,
+    ...(Number.isFinite(startedAt) ? { startedAt } : {}),
+    ...(Number.isFinite(endedAt) ? { endedAt } : {}),
+    ...(typeof durationMs === 'number' && Number.isFinite(durationMs)
+      ? { durationMs }
+      : {}),
+  };
+}
+
+function latestUsageDurationMs(eventsJson: unknown): number | undefined {
+  if (typeof eventsJson !== 'string' || eventsJson.length === 0) return undefined;
+  try {
+    const events = JSON.parse(eventsJson);
+    if (!Array.isArray(events)) return undefined;
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const event = events[i];
+      if (
+        event &&
+        typeof event === 'object' &&
+        event.kind === 'usage' &&
+        typeof event.durationMs === 'number' &&
+        Number.isFinite(event.durationMs)
+      ) {
+        return Math.max(0, event.durationMs);
+      }
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 export function insertConversation(db: SqliteDb, c: DbRow) {
