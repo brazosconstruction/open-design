@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom';
 import { APP_CHROME_FILE_ACTIONS_ID } from './AppChromeHeader';
 import { MarkdownRenderer, artifactRendererRegistry } from '../artifacts/renderer-registry';
 import { renderMarkdownToSafeHtml } from '../artifacts/markdown';
-import { useT } from '../i18n';
-import type { Dict } from '../i18n/types';
+import { useT, useI18n } from '../i18n';
+import type { Dict, Locale } from '../i18n/types';
 import {
   fetchLiveArtifact,
   fetchLiveArtifactCode,
@@ -88,6 +88,15 @@ type TranslateFn = (key: keyof Dict, vars?: Record<string, string | number>) => 
 type SlideState = { active: number; count: number };
 type BoardTool = 'inspect' | 'pod';
 type StrokePoint = { x: number; y: number };
+type PreviewViewportId = 'desktop' | 'tablet' | 'mobile';
+type PreviewCanvasSize = { width: number; height: number };
+type PreviewViewportPreset = {
+  id: PreviewViewportId;
+  width: number | null;
+  height: number | null;
+  labelKey: keyof Dict;
+  titleKey: keyof Dict;
+};
 type DeployProviderOption = {
   id: WebDeployProviderId;
   labelKey: 'fileViewer.vercelProvider' | 'fileViewer.cloudflarePagesProvider';
@@ -119,6 +128,29 @@ type DeployResultCard = {
   message?: string;
 };
 const MAX_BRIDGE_COORDINATE = 1_000_000;
+const PREVIEW_VIEWPORT_PRESETS: PreviewViewportPreset[] = [
+  {
+    id: 'desktop',
+    width: null,
+    height: null,
+    labelKey: 'fileViewer.viewportDesktop',
+    titleKey: 'fileViewer.viewportDesktopTitle',
+  },
+  {
+    id: 'tablet',
+    width: 820,
+    height: 1180,
+    labelKey: 'fileViewer.viewportTablet',
+    titleKey: 'fileViewer.viewportTabletTitle',
+  },
+  {
+    id: 'mobile',
+    width: 390,
+    height: 844,
+    labelKey: 'fileViewer.viewportMobile',
+    titleKey: 'fileViewer.viewportMobileTitle',
+  },
+];
 
 // The five basic style facets the inspect panel exposes. Kept narrow on
 // purpose — open-slide's design tokens panel only edits global tokens, so
@@ -264,6 +296,111 @@ function setMarkdownCodeBlockCopiedState(block: HTMLElement, copied: boolean, t:
   existingToast?.remove();
 }
 
+function PreviewViewportControls({
+  viewport,
+  onViewport,
+  t,
+  tabIndex,
+}: {
+  viewport: PreviewViewportId;
+  onViewport: (viewport: PreviewViewportId) => void;
+  t: TranslateFn;
+  tabIndex?: number;
+}) {
+  return (
+    <div className="viewer-viewport-switcher" role="group" aria-label={t('fileViewer.viewportAria')}>
+      {PREVIEW_VIEWPORT_PRESETS.map((preset) => (
+        <button
+          key={preset.id}
+          type="button"
+          className={`viewer-action viewer-viewport-button${viewport === preset.id ? ' active' : ''}`}
+          aria-pressed={viewport === preset.id}
+          title={t(preset.titleKey)}
+          tabIndex={tabIndex}
+          onClick={() => onViewport(preset.id)}
+        >
+          {t(preset.labelKey)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function previewViewportStyle(
+  viewport: PreviewViewportId,
+  previewScale = 1,
+  canvasSize?: PreviewCanvasSize,
+): CSSProperties & Record<string, string | number> {
+  const preset = PREVIEW_VIEWPORT_PRESETS.find((item) => item.id === viewport) ?? PREVIEW_VIEWPORT_PRESETS[0]!;
+  if (!preset.width) return {};
+  const effectiveScale = effectivePreviewScale(viewport, previewScale, canvasSize);
+  return {
+    '--preview-viewport-width': `${preset.width}px`,
+    '--preview-viewport-height': `${preset.height}px`,
+    '--preview-scale': effectiveScale,
+    '--preview-user-scale': previewScale,
+  };
+}
+
+export function effectivePreviewScale(
+  viewport: PreviewViewportId,
+  previewScale: number,
+  canvasSize?: PreviewCanvasSize,
+) {
+  if (viewport === 'desktop') return previewScale;
+  const preset = PREVIEW_VIEWPORT_PRESETS.find((item) => item.id === viewport);
+  if (!preset?.width || !preset.height || !canvasSize?.width || !canvasSize.height) return previewScale;
+  const canvasPadding = 48;
+  const availableWidth = Math.max(1, canvasSize.width - canvasPadding);
+  const availableHeight = Math.max(1, canvasSize.height - canvasPadding);
+  const fitScale = Math.min(1, availableWidth / preset.width, availableHeight / preset.height);
+  return Math.min(previewScale, fitScale);
+}
+
+function previewScaleShellStyle(
+  viewport: PreviewViewportId,
+  previewScale: number,
+): CSSProperties & Record<string, string | number> {
+  if (viewport === 'desktop') {
+    return {
+      width: `${100 / previewScale}%`,
+      height: `${100 / previewScale}%`,
+      transform: `scale(${previewScale})`,
+      transformOrigin: '0 0',
+    };
+  }
+  return {
+    width: 'var(--preview-viewport-width)',
+    height: 'var(--preview-viewport-height)',
+    transform: 'scale(var(--preview-scale, 1))',
+    transformOrigin: '0 0',
+  };
+}
+
+function usePreviewCanvasSize<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [size, setSize] = useState<PreviewCanvasSize | undefined>(undefined);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const rect = el.getBoundingClientRect();
+      setSize({ width: rect.width, height: rect.height });
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measure);
+      observer.observe(el);
+      return () => observer.disconnect();
+    }
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
+
+  return [ref, size] as const;
+}
+
 function ensureMarkdownCodeBlockControls(root: HTMLElement, t: TranslateFn) {
   for (const block of root.querySelectorAll<HTMLElement>(`[${MARKDOWN_CODE_BLOCK_ATTR}]`)) {
     let button = block.querySelector<HTMLButtonElement>(`.${MARKDOWN_COPY_BUTTON_CLASS}`);
@@ -392,6 +529,9 @@ export function LiveArtifactViewer({
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [zoom, setZoom] = useState(100);
+  const [previewViewport, setPreviewViewport] = useState<PreviewViewportId>('desktop');
+  const [previewBodyRef, previewBodySize] = usePreviewCanvasSize<HTMLDivElement>();
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshSuccess, setRefreshSuccess] = useState<string | null>(null);
@@ -399,8 +539,6 @@ export function LiveArtifactViewer({
   const [refreshHistory, setRefreshHistory] = useState<LiveArtifactRefreshLogEntry[]>([]);
   const [presentMenuOpen, setPresentMenuOpen] = useState(false);
   const [inTabPresent, setInTabPresent] = useState(false);
-  const previewBodyRef = useRef<HTMLDivElement | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const presentWrapRef = useRef<HTMLDivElement | null>(null);
   const [chromeActionsHost, setChromeActionsHost] = useState<HTMLElement | null>(null);
   useEffect(() => {
@@ -684,6 +822,13 @@ export function LiveArtifactViewer({
             aria-hidden={mode === 'preview' ? undefined : true}
           >
             <span className="viewer-divider" aria-hidden />
+            <PreviewViewportControls
+              viewport={previewViewport}
+              onViewport={setPreviewViewport}
+              t={t}
+              tabIndex={mode === 'preview' ? 0 : -1}
+            />
+            <span className="viewer-divider" aria-hidden />
             <button
               type="button"
               className="icon-only"
@@ -744,7 +889,7 @@ export function LiveArtifactViewer({
           </button>
         </div>
       </div>
-      <div className="viewer-body">
+      <div className="viewer-body" ref={previewBodyRef}>
         {refreshError ? (
           <LiveArtifactRefreshNotice
             tone="error"
@@ -773,25 +918,22 @@ export function LiveArtifactViewer({
           />
         ) : null}
         {mode === 'preview' ? (
-          <div ref={previewBodyRef} className="live-artifact-preview-frame-host">
-            <div
-              style={{
-                width: `${100 / previewScale}%`,
-                height: `${100 / previewScale}%`,
-                transform: `scale(${previewScale})`,
-                transformOrigin: '0 0',
-              }}
-            >
-              <PreviewDrawOverlay>
-                <iframe
-                  ref={iframeRef}
-                  data-testid="live-artifact-preview-frame"
-                  title={liveArtifact.title}
-                  sandbox="allow-scripts allow-popups"
-                  src={previewUrl}
-                  style={{ width: '100%', height: '100%', border: 0 }}
-                />
-              </PreviewDrawOverlay>
+          <div
+            className={`live-artifact-preview-layer preview-viewport preview-viewport-${previewViewport}`}
+            style={previewViewportStyle(previewViewport, previewScale, previewBodySize)}
+          >
+            <div className="preview-frame-clip">
+              <div style={previewScaleShellStyle(previewViewport, previewScale)}>
+                <PreviewDrawOverlay>
+                  <iframe
+                    ref={iframeRef}
+                    data-testid="live-artifact-preview-frame"
+                    title={liveArtifact.title}
+                    sandbox="allow-scripts allow-popups"
+                    src={previewUrl}
+                  />
+                </PreviewDrawOverlay>
+              </div>
             </div>
           </div>
         ) : loading ? (
@@ -1051,20 +1193,44 @@ function formatAbsoluteDateTime(iso: string | number | undefined): string | null
   }
 }
 
-function formatRelativeTime(iso: string | number | undefined, now = Date.now()): string | null {
+function formatRelativeTime(
+  iso: string | number | undefined,
+  now = Date.now(),
+  locale: Locale = 'en',
+  t?: TranslateFn,
+): string | null {
   if (iso === undefined || iso === null) return null;
   const ms = typeof iso === 'number' ? iso : new Date(iso).getTime();
   if (Number.isNaN(ms)) return null;
   const deltaSec = Math.round((ms - now) / 1000);
   const abs = Math.abs(deltaSec);
-  const suffix = deltaSec <= 0 ? ' ago' : ' from now';
-  if (abs < 5) return 'just now';
-  if (abs < 60) return `${abs}s${suffix}`;
-  if (abs < 3600) return `${Math.round(abs / 60)}m${suffix}`;
-  if (abs < 86400) return `${Math.round(abs / 3600)}h${suffix}`;
-  if (abs < 86400 * 30) return `${Math.round(abs / 86400)}d${suffix}`;
-  if (abs < 86400 * 365) return `${Math.round(abs / (86400 * 30))}mo${suffix}`;
-  return `${Math.round(abs / (86400 * 365))}y${suffix}`;
+  if (abs < 5) {
+    // "just now" lives in the i18n dict because Intl.RelativeTimeFormat's
+    // "0 seconds ago" reads awkwardly in narrow style and we want a
+    // single canonical translation per locale. Fall back to the English
+    // literal only when called without t (background utilities, tests).
+    return t ? t('liveArtifact.refresh.justNow') : 'just now';
+  }
+  // Intl.RelativeTimeFormat handles tense (past / future), pluralisation,
+  // and word-order per locale so the panel matches the rest of the
+  // localised UI instead of mixing in English units like `5s ago`.
+  // `style: 'narrow'` keeps the English output close to the historical
+  // `5s ago` shape; `numeric: 'always'` forces numeric output so we
+  // don't get "yesterday" / "now" mixed in unexpectedly with the
+  // bucketing above.
+  let rtf: Intl.RelativeTimeFormat;
+  try {
+    rtf = new Intl.RelativeTimeFormat(locale, { style: 'narrow', numeric: 'always' });
+  } catch {
+    rtf = new Intl.RelativeTimeFormat('en', { style: 'narrow', numeric: 'always' });
+  }
+  const value = deltaSec; // negative = past, positive = future
+  if (abs < 60) return rtf.format(value, 'second');
+  if (abs < 3600) return rtf.format(Math.round(value / 60), 'minute');
+  if (abs < 86400) return rtf.format(Math.round(value / 3600), 'hour');
+  if (abs < 86400 * 30) return rtf.format(Math.round(value / 86400), 'day');
+  if (abs < 86400 * 365) return rtf.format(Math.round(value / (86400 * 30)), 'month');
+  return rtf.format(Math.round(value / (86400 * 365)), 'year');
 }
 
 function formatDurationMs(ms: number | undefined): string | null {
@@ -1082,48 +1248,76 @@ interface RefreshStatusDescriptor {
   description: string;
 }
 
-function describeRefreshStatus(status: LiveArtifactRefreshStatus): RefreshStatusDescriptor {
+function describeRefreshStatus(
+  status: LiveArtifactRefreshStatus,
+  t: TranslateFn,
+): RefreshStatusDescriptor {
   switch (status) {
     case 'running':
       return {
-        label: 'Refreshing',
+        label: t('liveArtifact.refresh.statusRunning'),
         tone: 'running',
-        description: 'A refresh run is currently in progress.',
+        description: t('liveArtifact.refresh.statusRunningDescription'),
       };
     case 'succeeded':
       return {
-        label: 'Up to date',
+        label: t('liveArtifact.refresh.statusSucceeded'),
         tone: 'success',
-        description: 'The last refresh finished successfully.',
+        description: t('liveArtifact.refresh.statusSucceededDescription'),
       };
     case 'failed':
       return {
-        label: 'Refresh failed',
+        label: t('liveArtifact.refresh.statusFailed'),
         tone: 'error',
-        description: 'The last refresh attempt did not complete successfully.',
+        description: t('liveArtifact.refresh.statusFailedDescription'),
       };
     case 'idle':
       return {
-        label: 'Ready to refresh',
+        label: t('liveArtifact.refresh.statusReady'),
         tone: 'neutral',
-        description: 'Refreshable sources are configured but no run is in progress.',
+        description: t('liveArtifact.refresh.statusReadyDescription'),
       };
     case 'never':
     default:
       return {
-        label: 'Not refreshable',
+        label: t('liveArtifact.refresh.statusNever'),
         tone: 'warning',
-        description: 'This live artifact has no refresh source yet.',
+        description: t('liveArtifact.refresh.statusNeverDescription'),
       };
   }
 }
 
 function describeEventPhase(
   event: LiveArtifactRefreshEvent,
+  t: TranslateFn,
 ): { label: string; tone: 'running' | 'success' | 'error' } {
-  if (event.phase === 'started') return { label: 'Started', tone: 'running' };
-  if (event.phase === 'succeeded') return { label: 'Succeeded', tone: 'success' };
-  return { label: 'Failed', tone: 'error' };
+  if (event.phase === 'started')
+    return { label: t('liveArtifact.refresh.eventStarted'), tone: 'running' };
+  if (event.phase === 'succeeded')
+    return { label: t('liveArtifact.refresh.eventSucceeded'), tone: 'success' };
+  return { label: t('liveArtifact.refresh.eventFailed'), tone: 'error' };
+}
+
+function describePersistedStatus(
+  status: LiveArtifactRefreshLogEntry['status'],
+  t: TranslateFn,
+): string {
+  switch (status) {
+    case 'succeeded':
+      return t('liveArtifact.refresh.persistedStatusSucceeded');
+    case 'running':
+      return t('liveArtifact.refresh.persistedStatusRunning');
+    case 'failed':
+      return t('liveArtifact.refresh.persistedStatusFailed');
+    case 'cancelled':
+      return t('liveArtifact.refresh.persistedStatusCancelled');
+    case 'skipped':
+      return t('liveArtifact.refresh.persistedStatusSkipped');
+    default: {
+      const exhaustive: never = status;
+      return exhaustive;
+    }
+  }
 }
 
 export function LiveArtifactRefreshHistoryPanel({
@@ -1141,6 +1335,8 @@ export function LiveArtifactRefreshHistoryPanel({
   sessionEvents: LiveArtifactRefreshEvent[];
   persistedEvents?: LiveArtifactRefreshLogEntry[];
 }) {
+  const t = useT();
+  const { locale } = useI18n();
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -1152,7 +1348,7 @@ export function LiveArtifactRefreshHistoryPanel({
   const status: LiveArtifactRefreshStatus = isRunning
     ? 'running'
     : liveArtifact?.refreshStatus ?? fallbackRefreshStatus;
-  const descriptor = describeRefreshStatus(status);
+  const descriptor = describeRefreshStatus(status, t);
   const lastRefreshedAt = liveArtifact?.lastRefreshedAt ?? fallbackLastRefreshedAt;
   const createdAt = liveArtifact?.createdAt;
   const updatedAt = liveArtifact?.updatedAt;
@@ -1181,11 +1377,13 @@ export function LiveArtifactRefreshHistoryPanel({
         </div>
         <div className="live-artifact-refresh-hero-meta">
           <div className="live-artifact-refresh-hero-metric">
-            <span className="live-artifact-refresh-label">Last refreshed</span>
+            <span className="live-artifact-refresh-label">
+              {t('liveArtifact.refresh.heroLastRefreshedLabel')}
+            </span>
             {lastRefreshedAt ? (
               <>
                 <span className="live-artifact-refresh-value">
-                  {formatRelativeTime(lastRefreshedAt, now) ?? '—'}
+                  {formatRelativeTime(lastRefreshedAt, now, locale, t) ?? '—'}
                 </span>
                 <span
                   className="live-artifact-refresh-sub"
@@ -1195,7 +1393,9 @@ export function LiveArtifactRefreshHistoryPanel({
                 </span>
               </>
             ) : (
-              <span className="live-artifact-refresh-value muted">Never</span>
+              <span className="live-artifact-refresh-value muted">
+                {t('liveArtifact.refresh.heroLastRefreshedNever')}
+              </span>
             )}
           </div>
         </div>
@@ -1203,29 +1403,33 @@ export function LiveArtifactRefreshHistoryPanel({
 
       <section className="live-artifact-refresh-facts">
         <LiveArtifactRefreshFact
-          label="Created"
+          label={t('liveArtifact.refresh.factCreated')}
           iso={createdAt}
-          emptyLabel="Unknown"
+          emptyLabel={t('liveArtifact.refresh.factUnknown')}
           now={now}
+          locale={locale}
+          t={t}
         />
         <LiveArtifactRefreshFact
-          label="Last updated"
+          label={t('liveArtifact.refresh.factLastUpdated')}
           iso={updatedAt}
-          emptyLabel="Unknown"
+          emptyLabel={t('liveArtifact.refresh.factUnknown')}
           now={now}
+          locale={locale}
+          t={t}
         />
       </section>
 
       <section className="live-artifact-refresh-section">
         <header className="live-artifact-refresh-section-header">
-          <h4>Persisted refresh history</h4>
+          <h4>{t('liveArtifact.refresh.persistedTitle')}</h4>
           <span className="live-artifact-refresh-hint">
-            Entries loaded from refreshes.jsonl
+            {t('liveArtifact.refresh.persistedHint')}
           </span>
         </header>
         {reversedPersistedEvents.length === 0 ? (
           <div className="live-artifact-refresh-empty">
-            No persisted refresh history yet.
+            {t('liveArtifact.refresh.persistedEmpty')}
           </div>
         ) : (
           <ol className="live-artifact-refresh-timeline">
@@ -1244,11 +1448,12 @@ export function LiveArtifactRefreshHistoryPanel({
                   <div className="live-artifact-refresh-event-body">
                     <div className="live-artifact-refresh-event-row">
                       <span className={`live-artifact-badge refresh-status tone-${tone}`}>
-                        {event.status}
+                        {describePersistedStatus(event.status, t)}
                       </span>
                       <strong>{event.step}</strong>
                       <span className="live-artifact-refresh-event-time">
-                        {formatRelativeTime(event.startedAt, now) ?? 'just now'}
+                        {formatRelativeTime(event.startedAt, now, locale, t)
+                          ?? t('liveArtifact.refresh.justNow')}
                       </span>
                     </div>
                     <div className="live-artifact-refresh-event-meta">
@@ -1266,21 +1471,21 @@ export function LiveArtifactRefreshHistoryPanel({
 
       <section className="live-artifact-refresh-section">
         <header className="live-artifact-refresh-section-header">
-          <h4>Session activity</h4>
+          <h4>{t('liveArtifact.refresh.sessionTitle')}</h4>
           <span className="live-artifact-refresh-hint">
-            Events observed while this tab is open
+            {t('liveArtifact.refresh.sessionHint')}
           </span>
         </header>
         {reversedEvents.length === 0 ? (
           <div className="live-artifact-refresh-empty">
-            No refresh activity yet in this session. Trigger
-            {' '}<em>Refresh</em>{' '}to record a timeline, or wait for automated runs.
+            {t('liveArtifact.refresh.timelineEmpty')}
           </div>
         ) : (
           <ol className="live-artifact-refresh-timeline">
             {reversedEvents.map((event) => {
-              const phase = describeEventPhase(event);
+              const phase = describeEventPhase(event, t);
               const duration = formatDurationMs(event.durationMs);
+              const refreshedCount = event.refreshedSourceCount ?? 0;
               return (
                 <li key={event.id} className={`live-artifact-refresh-event tone-${phase.tone}`}>
                   <span className="live-artifact-refresh-event-dot" aria-hidden />
@@ -1295,24 +1500,27 @@ export function LiveArtifactRefreshHistoryPanel({
                         className="live-artifact-refresh-event-time"
                         title={formatAbsoluteDateTime(event.at) ?? undefined}
                       >
-                        {formatRelativeTime(event.at, now) ?? ''}
+                        {formatRelativeTime(event.at, now, locale, t) ?? ''}
                       </span>
                     </div>
                     <div className="live-artifact-refresh-event-detail">
                       {event.phase === 'succeeded' ? (
                         <span>
-                          {`${event.refreshedSourceCount ?? 0} source${
-                            (event.refreshedSourceCount ?? 0) === 1 ? '' : 's'
-                          } updated`}
+                          {t(
+                            refreshedCount === 1
+                              ? 'liveArtifact.refresh.sourcesUpdatedOne'
+                              : 'liveArtifact.refresh.sourcesUpdatedMany',
+                            { n: refreshedCount },
+                          )}
                           {duration ? ` · ${duration}` : ''}
                         </span>
                       ) : event.phase === 'failed' ? (
                         <span>
-                          {event.error ?? 'Refresh failed.'}
+                          {event.error ?? t('liveArtifact.refresh.genericFailure')}
                           {duration ? ` · ${duration}` : ''}
                         </span>
                       ) : (
-                        <span>Refresh started…</span>
+                        <span>{t('liveArtifact.refresh.eventStartedDetail')}</span>
                       )}
                     </div>
                   </div>
@@ -1326,19 +1534,19 @@ export function LiveArtifactRefreshHistoryPanel({
       {documentSource ? (
         <section className="live-artifact-refresh-section">
           <header className="live-artifact-refresh-section-header">
-            <h4>Document source</h4>
+            <h4>{t('liveArtifact.refresh.docSourceTitle')}</h4>
             <span className="live-artifact-refresh-hint">
-              Source configured
+              {t('liveArtifact.refresh.docSourceHint')}
             </span>
           </header>
           <dl className="live-artifact-refresh-kv">
             <div>
-              <dt>Type</dt>
+              <dt>{t('liveArtifact.refresh.docSourceType')}</dt>
               <dd>{documentSource.type}</dd>
             </div>
             {documentSource.toolName ? (
               <div>
-                <dt>Tool</dt>
+                <dt>{t('liveArtifact.refresh.docSourceTool')}</dt>
                 <dd>
                   <code>{documentSource.toolName}</code>
                 </dd>
@@ -1346,7 +1554,7 @@ export function LiveArtifactRefreshHistoryPanel({
             ) : null}
             {documentSource.connector ? (
               <div>
-                <dt>Connector</dt>
+                <dt>{t('liveArtifact.refresh.docSourceConnector')}</dt>
                 <dd>
                   {documentSource.connector.accountLabel ??
                     documentSource.connector.connectorId}
@@ -1359,9 +1567,9 @@ export function LiveArtifactRefreshHistoryPanel({
 
       {rawDebugPayload != null ? (
         <details className="live-artifact-refresh-raw">
-          <summary>Advanced debug metadata</summary>
+          <summary>{t('liveArtifact.refresh.debugSummary')}</summary>
           <p className="live-artifact-refresh-raw-note">
-            May include connector IDs, file names, source metadata, and internal artifact paths.
+            {t('liveArtifact.refresh.debugNote')}
           </p>
           <pre className="viewer-source">{JSON.stringify(rawDebugPayload, null, 2)}</pre>
         </details>
@@ -1377,6 +1585,8 @@ function LiveArtifactRefreshFact({
   helper,
   emptyLabel,
   now,
+  locale,
+  t,
 }: {
   label: string;
   iso?: string;
@@ -1384,8 +1594,10 @@ function LiveArtifactRefreshFact({
   helper?: string;
   emptyLabel?: string;
   now?: number;
+  locale?: Locale;
+  t?: TranslateFn;
 }) {
-  const relative = iso !== undefined ? formatRelativeTime(iso, now) : null;
+  const relative = iso !== undefined ? formatRelativeTime(iso, now, locale, t) : null;
   const absolute = iso !== undefined ? formatAbsoluteDateTime(iso) : null;
   const resolved = value ?? relative ?? emptyLabel ?? '—';
   const sub = helper ?? (iso !== undefined ? absolute ?? '' : '');
@@ -2961,6 +3173,7 @@ function HtmlViewer({
   const [source, setSource] = useState<string | null>(liveHtml ?? null);
   const [inlinedSource, setInlinedSource] = useState<string | null>(null);
   const [zoom, setZoom] = useState(100);
+  const [previewViewport, setPreviewViewport] = useState<PreviewViewportId>('desktop');
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
   const zoomMenuRef = useRef<HTMLDivElement | null>(null);
   const [presentMenuOpen, setPresentMenuOpen] = useState(false);
@@ -3176,7 +3389,8 @@ function HtmlViewer({
   const [slideState, setSlideState] = useState<SlideState | null>(
     () => htmlPreviewSlideState.get(previewStateKey) ?? null,
   );
-  const previewBodyRef = useRef<HTMLDivElement | null>(null);
+  const [previewBodyRef, previewBodySize] = usePreviewCanvasSize<HTMLDivElement>();
+  const overlayPreviewScale = effectivePreviewScale(previewViewport, previewScale, previewBodySize);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const shareRef = useRef<HTMLDivElement | null>(null);
   const [chromeActionsHost, setChromeActionsHost] = useState<HTMLElement | null>(null);
@@ -4501,6 +4715,12 @@ function HtmlViewer({
             <span>{t('fileViewer.edit')}</span>
           </button>
           <span className="viewer-divider" aria-hidden />
+          <PreviewViewportControls
+            viewport={previewViewport}
+            onViewport={setPreviewViewport}
+            t={t}
+          />
+          <span className="viewer-divider" aria-hidden />
           <button
             type="button"
             className="icon-only"
@@ -4753,7 +4973,10 @@ function HtmlViewer({
         {source === null ? (
           <div className="viewer-empty">{t('fileViewer.loading')}</div>
         ) : mode === 'preview' ? (
-          <div className={manualEditMode ? 'manual-edit-workspace' : 'comment-preview-layer'}>
+          <div
+            className={`${manualEditMode ? 'manual-edit-workspace' : 'comment-preview-layer'} preview-viewport preview-viewport-${previewViewport}`}
+            style={previewViewportStyle(previewViewport, previewScale, previewBodySize)}
+          >
             {manualEditMode ? (
               <ManualEditPanel
                 targets={manualEditTargets}
@@ -4783,12 +5006,7 @@ function HtmlViewer({
             ) : null}
             <div className={manualEditMode ? 'manual-edit-canvas' : 'comment-frame-clip'}>
               <div
-                style={{
-                  width: `${100 / previewScale}%`,
-                  height: `${100 / previewScale}%`,
-                  transform: `scale(${previewScale})`,
-                  transformOrigin: '0 0',
-                }}
+                style={previewScaleShellStyle(previewViewport, previewScale)}
               >
                 {useUrlLoadPreview ? (
                   <iframe
@@ -4829,7 +5047,7 @@ function HtmlViewer({
                 hoveredTarget={hoveredCommentTarget}
                 activeTarget={activeCommentTarget}
                 boardTool={boardTool}
-                scale={previewScale}
+                scale={overlayPreviewScale}
                 strokePoints={strokePoints}
                 onOpenComment={(comment, snapshot) => {
                   setActiveCommentTarget(snapshot);
@@ -5693,7 +5911,11 @@ function TextViewer({
     }
   }
 
-  const lineCount = text ? text.split('\n').length : 0;
+  const displayText = useMemo(
+    () => (text == null ? null : formatJsonFileTextForDisplay(file, text)),
+    [file.name, file.mime, text],
+  );
+  const lineCount = displayText ? displayText.split('\n').length : 0;
 
   return (
     <div className="viewer text-viewer">
@@ -5732,14 +5954,117 @@ function TextViewer({
       <div className="viewer-body">
         {text === null ? (
           <div className="viewer-empty">{t('fileViewer.loading')}</div>
-        ) : lineCount > 0 ? (
-          <CodeWithLines text={text} />
+        ) : displayText !== null && lineCount > 0 ? (
+          <CodeWithLines text={displayText} />
         ) : (
-          <pre className="viewer-source">{text}</pre>
+          <pre className="viewer-source">{displayText}</pre>
         )}
       </div>
     </div>
   );
+}
+
+function formatJsonFileTextForDisplay(file: ProjectFile, text: string): string {
+  if (!isJsonFile(file)) return text;
+  try {
+    if (hasPrecisionSensitiveJsonNumberText(text)) return text;
+    const parsed = JSON.parse(text) as unknown;
+    if (hasUnsafeJsonNumber(parsed)) return text;
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return text;
+  }
+}
+
+function hasPrecisionSensitiveJsonNumberText(text: string): boolean {
+  let inString = false;
+  let escaped = false;
+  const numberTokenPattern = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+  for (let i = 0; i < text.length;) {
+    const char = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      i += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      i += 1;
+      continue;
+    }
+
+    numberTokenPattern.lastIndex = i;
+    const match = numberTokenPattern.exec(text);
+    if (!match) {
+      i += 1;
+      continue;
+    }
+
+    const token = match[0];
+    if (isSignedNegativeZeroJsonNumberToken(token)) return true;
+    if (/[.eE]/.test(token) && isPrecisionSensitiveJsonNumberToken(token)) return true;
+    i = numberTokenPattern.lastIndex;
+  }
+  return false;
+}
+
+function isSignedNegativeZeroJsonNumberToken(token: string): boolean {
+  return /^-0(?:\.0+)?(?:[eE][+-]?\d+)?$/.test(token);
+}
+
+function isPrecisionSensitiveJsonNumberToken(token: string): boolean {
+  const parsed = Number(token);
+  if (!Number.isFinite(parsed)) return true;
+  const rendered = JSON.stringify(parsed);
+  if (!rendered) return true;
+  const originalValue = parseJsonNumberTokenAsDecimal(token);
+  const renderedValue = parseJsonNumberTokenAsDecimal(rendered);
+  return (
+    !originalValue ||
+    !renderedValue ||
+    originalValue.coefficient !== renderedValue.coefficient ||
+    originalValue.exponent !== renderedValue.exponent
+  );
+}
+
+function parseJsonNumberTokenAsDecimal(token: string): { coefficient: bigint; exponent: number } | null {
+  const match = /^(-)?(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(token);
+  if (!match) return null;
+  const [, sign, integerPart, fractionPart = '', exponentPart = '0'] = match;
+  const coefficient = BigInt(`${sign ?? ''}${integerPart}${fractionPart}`);
+  const exponent = Number(exponentPart) - fractionPart.length;
+  return normalizeDecimalParts(coefficient, exponent);
+}
+
+function normalizeDecimalParts(coefficient: bigint, exponent: number): { coefficient: bigint; exponent: number } {
+  if (coefficient === 0n) return { coefficient: 0n, exponent: 0 };
+  let normalizedCoefficient = coefficient;
+  let normalizedExponent = exponent;
+  while (normalizedCoefficient % 10n === 0n) {
+    normalizedCoefficient /= 10n;
+    normalizedExponent += 1;
+  }
+  return { coefficient: normalizedCoefficient, exponent: normalizedExponent };
+}
+
+function hasUnsafeJsonNumber(value: unknown): boolean {
+  if (typeof value === 'number') {
+    return !Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value));
+  }
+  if (Array.isArray(value)) return value.some(hasUnsafeJsonNumber);
+  if (value && typeof value === 'object') return Object.values(value).some(hasUnsafeJsonNumber);
+  return false;
+}
+
+function isJsonFile(file: ProjectFile): boolean {
+  return file.name.toLowerCase().endsWith('.json') || file.mime.toLowerCase().startsWith('application/json');
 }
 
 function MarkdownViewer({

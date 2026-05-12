@@ -61,6 +61,7 @@ import {
 import { attachAcpSession } from './acp.js';
 import { attachPiRpcSession } from './pi-rpc.js';
 import { createClaudeStreamHandler } from './claude-stream.js';
+import { diagnoseClaudeCliFailure } from './claude-diagnostics.js';
 import { loadCritiqueConfigFromEnv } from './critique/config.js';
 import { reconcileStaleRuns } from './critique/persistence.js';
 import { runOrchestrator } from './critique/orchestrator.js';
@@ -3729,6 +3730,9 @@ export async function startServer({
     let child;
     let acpSession = null;
     let writePromptToChildStdin = false;
+    let spawnedAgentEnv = null;
+    let agentStdoutTail = '';
+    let agentStderrTail = '';
     try {
       // Prompt delivery via stdin is now the universal default. This bypasses
       // both the cmd.exe 8KB limit and the CreateProcess 32KB limit.
@@ -3747,6 +3751,7 @@ export async function startServer({
         ),
         ...odMediaEnv,
       };
+      spawnedAgentEnv = env;
       const invocation = createCommandInvocation({
         command: resolvedBin,
         args,
@@ -3796,9 +3801,12 @@ export async function startServer({
     // structured adapters that buffer partial lines (Codex item.completed,
     // pi-rpc session/prompt, ACP agent messages) and models that spend a
     // long time in non-streamed reasoning still keep the run alive.
-    child.stdout.on('data', () => {
+    child.stdout.on('data', (chunk) => {
       childStdoutSeen = true;
       noteAgentActivity();
+      if (def.id === 'claude') {
+        agentStdoutTail = `${agentStdoutTail}${chunk}`.slice(-1000);
+      }
     });
 
     // ---- Memory: assistant-reply buffer for LLM extraction --------------
@@ -4096,6 +4104,9 @@ export async function startServer({
     run.acpSession = acpSession;
     child.stderr.on('data', (chunk) => {
       noteAgentActivity();
+      if (def.id === 'claude') {
+        agentStderrTail = `${agentStderrTail}${chunk}`.slice(-1000);
+      }
       send('stderr', { chunk });
     });
 
@@ -4143,6 +4154,23 @@ export async function startServer({
         : code === 0
           ? 'succeeded'
           : 'failed';
+      if (status === 'failed') {
+        const diagnostic = diagnoseClaudeCliFailure({
+          agentId: def.id,
+          exitCode: code,
+          signal,
+          stderrTail: agentStderrTail,
+          stdoutTail: agentStdoutTail,
+          env: spawnedAgentEnv,
+        });
+        if (diagnostic) {
+          send('error', createSseErrorPayload(
+            'AGENT_EXECUTION_FAILED',
+            diagnostic.message,
+            { retryable: diagnostic.retryable, details: { detail: diagnostic.detail } },
+          ));
+        }
+      }
       design.runs.finish(run, status, code, signal);
     });
     if (writePromptToChildStdin && child.stdin) {

@@ -138,8 +138,12 @@ export const fa: Dict = {
   'settings.cliEnvHint':
     'Set non-secret config directories for packaged app runs and agent detection.',
   'settings.cliEnvClaudeConfigDir': 'Claude Code config directory',
+  'settings.cliEnvClaudeBaseUrl': 'Claude proxy base URL',
+  'settings.cliEnvClaudeApiKey': 'Claude proxy API key',
   'settings.cliEnvCodexHome': 'Codex home',
   'settings.cliEnvCodexBin': 'Codex executable path',
+  'settings.cliEnvCodexBaseUrl': 'Codex/OpenAI proxy base URL',
+  'settings.cliEnvCodexApiKey': 'Codex/OpenAI proxy API key',
   'settings.modelCustom': 'سفارشی (در زیر تایپ کنید)…',
   'settings.modelCustomLabel': 'شناسه مدل سفارشی',
   'settings.modelCustomPlaceholder': 'مثلاً anthropic/claude-sonnet-4-6',
@@ -345,6 +349,15 @@ export const fa: Dict = {
   'newproj.toggleAnimations': 'افزودن انیمیشن',
   'newproj.toggleAnimationsHint':
     'افزودن حرکت (ورود، هاور، انتقال) بر روی قالب.',
+  'newproj.surfaceOptionsLabel': 'Companion surfaces',
+  'newproj.includeLandingPage': 'Include landing page',
+  'newproj.includeLandingPageHint':
+    'Add a responsive marketing page for ads, waitlists, launch campaigns, app downloads, or product explanation.',
+  'newproj.includeOsWidgets': 'Include OS widgets',
+  'newproj.includeOsWidgetsHint':
+    'Add platform-native home screen, lock screen, or quick-access widgets for mobile/tablet apps.',
+  'newproj.includeOsWidgetsDisabledHint':
+    'Available when iOS, Android, or tablet app is selected as a target platform.',
   'newproj.templateLabel': 'قالب',
   'newproj.noTemplatesTitle': 'هنوز هیچ قالبی وجود ندارد',
   'newproj.noTemplatesBody':
@@ -806,6 +819,13 @@ export const fa: Dict = {
   'fileViewer.zoomOut': 'کوچک‌نمایی',
   'fileViewer.zoomIn': 'بزرگ‌نمایی',
   'fileViewer.resetZoom': 'بازنشانی زوم',
+  'fileViewer.viewportAria': 'Preview viewport',
+  'fileViewer.viewportDesktop': 'Desktop',
+  'fileViewer.viewportDesktopTitle': 'Full-width desktop preview',
+  'fileViewer.viewportTablet': 'Tablet',
+  'fileViewer.viewportTabletTitle': 'Tablet preview at 820 × 1180 (modern portrait baseline)',
+  'fileViewer.viewportMobile': 'Mobile',
+  'fileViewer.viewportMobileTitle': 'Mobile preview at 390 × 844',
   'fileViewer.reloadAria': 'بارگذاری مجدد',
   'fileViewer.previousSlide': 'اسلاید قبلی',
   'fileViewer.nextSlide': 'اسلاید بعدی',

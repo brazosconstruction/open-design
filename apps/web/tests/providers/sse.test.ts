@@ -211,6 +211,40 @@ describe('streamViaDaemon', () => {
     expect(handlers.onDone).not.toHaveBeenCalled();
   });
 
+  it('includes unified SSE error details in daemon error messages', async () => {
+    const handlers = createDaemonHandlers();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce(jsonResponse({ runId: 'run-1' }))
+        .mockResolvedValueOnce(
+          sseResponse(
+            [
+              'event: error',
+              'data: {"message":"Claude Code failed","error":{"code":"AGENT_EXECUTION_FAILED","message":"Claude Code failed","details":{"detail":"Set CLAUDE_CONFIG_DIR in Settings and retry."}}}',
+              '',
+              '',
+            ].join('\n'),
+          ),
+        ),
+    );
+
+    await streamViaDaemon({
+      agentId: 'mock',
+      history: [{ id: '1', role: 'user', content: 'hello' }],
+      systemPrompt: '',
+      signal: new AbortController().signal,
+      handlers,
+    });
+
+    expect(handlers.onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining('Set CLAUDE_CONFIG_DIR in Settings'),
+      }),
+    );
+    expect(handlers.onDone).not.toHaveBeenCalled();
+  });
+
   it('keeps the daemon run alive when the browser-side stream aborts', async () => {
     const handlers = createDaemonHandlers();
     const controller = new AbortController();

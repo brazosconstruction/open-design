@@ -179,6 +179,19 @@ export interface DaemonReattachOptions {
   onRunEventId?: (eventId: string) => void;
 }
 
+function daemonSseErrorMessage(data: SseErrorPayload): string {
+  const message = String(data.error?.message ?? data.message ?? 'daemon error');
+  const detail =
+    data.error?.details &&
+    typeof data.error.details === 'object' &&
+    !Array.isArray(data.error.details) &&
+    typeof data.error.details.detail === 'string'
+      ? data.error.details.detail
+      : null;
+  if (!detail || detail === message || message.includes(detail)) return message;
+  return `${message}\n${detail}`;
+}
+
 export async function streamViaDaemon({
   agentId,
   history,
@@ -410,7 +423,7 @@ async function consumeDaemonRun({
           if (event.event === 'error') {
             onRunStatus?.('failed');
             const data = event.data as SseErrorPayload;
-            handlers.onError(new Error(String(data.error?.message ?? data.message ?? 'daemon error')));
+            handlers.onError(new Error(daemonSseErrorMessage(data)));
             return;
           }
 

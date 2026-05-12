@@ -30,6 +30,7 @@ import { createCommandInvocation } from '@open-design/platform';
 import { attachAcpSession } from './acp.js';
 import { attachPiRpcSession } from './pi-rpc.js';
 import { createClaudeStreamHandler } from './claude-stream.js';
+import { diagnoseClaudeCliFailure } from './claude-diagnostics.js';
 import { createCopilotStreamHandler } from './copilot-stream.js';
 import { createJsonEventStreamHandler } from './json-event-stream.js';
 import { agentCliEnvForAgent, validateAgentCliEnv } from './app-config.js';
@@ -724,12 +725,15 @@ interface AgentSink {
   streamError: Promise<Error>;
   getText: () => string;
   getStderrTail: () => string;
+  appendRawStdout: (chunk: string) => void;
+  getRawStdoutTail: () => string;
   dispose: () => void;
 }
 
 export function createAgentSink(): AgentSink {
   let buffer = '';
   let stderrTail = '';
+  let rawStdoutTail = '';
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let resolveResult!: (value: AgentSinkResult) => void;
   let resolveStreamError!: (value: Error) => void;
@@ -774,6 +778,12 @@ export function createAgentSink(): AgentSink {
     scheduleTextResolution();
   };
 
+  const appendRawStdout = (chunk: string) => {
+    if (typeof chunk === 'string' && chunk.length > 0) {
+      rawStdoutTail = (rawStdoutTail + chunk).slice(-400);
+    }
+  };
+
   const send = (event: string, payload: unknown) => {
     const data = (payload ?? {}) as Record<string, unknown>;
     if (event === 'error') {
@@ -805,7 +815,10 @@ export function createAgentSink(): AgentSink {
     }
     if (event === 'stdout') {
       const chunk = data.chunk;
-      if (typeof chunk === 'string') consumeText(chunk);
+      if (typeof chunk === 'string') {
+        appendRawStdout(chunk);
+        consumeText(chunk);
+      }
       return;
     }
     if (event === 'stderr') {
@@ -825,6 +838,8 @@ export function createAgentSink(): AgentSink {
     streamError,
     getText: () => buffer,
     getStderrTail: () => stderrTail,
+    appendRawStdout,
+    getRawStdoutTail: () => rawStdoutTail,
     dispose: () => {
       if (debounceTimer) {
         clearTimeout(debounceTimer);
@@ -846,13 +861,17 @@ function attachAgentStreamHandlers(
   cwd: string,
   model: string | undefined,
   send: (event: string, payload: unknown) => void,
+  appendRawStdout?: (chunk: string) => void,
 ): AgentSpawnHandle {
   let acpSession: { hasFatalError?: () => boolean } | null = null;
   child.stdout?.setEncoding('utf8');
   child.stderr?.setEncoding('utf8');
   if (def.streamFormat === 'claude-stream-json') {
     const claude = createClaudeStreamHandler((ev: unknown) => send('agent', ev));
-    child.stdout?.on('data', (chunk: string) => claude.feed(chunk));
+    child.stdout?.on('data', (chunk: string) => {
+      appendRawStdout?.(chunk);
+      claude.feed(chunk);
+    });
     child.on('close', () => claude.flush());
   } else if (def.streamFormat === 'copilot-stream-json') {
     const copilot = createCopilotStreamHandler((ev: unknown) => send('agent', ev));
@@ -1100,6 +1119,7 @@ async function testAgentConnectionInternal(
       tempDir,
       input.model,
       sink.send,
+      sink.appendRawStdout,
     );
 
     const resultFromChildExit = (
@@ -1141,7 +1161,29 @@ async function testAgentConnectionInternal(
         if (exitedCleanly) return resultFromAgentText(buffered);
       }
       const stderrTail = sink.getStderrTail().trim();
+      const rawStdoutTail = sink.getRawStdoutTail().trim();
       const acpFatal = Boolean(acpSession?.hasFatalError?.());
+      const claudeDiagnostic = diagnoseClaudeCliFailure({
+        agentId: input.agentId,
+        exitCode: winner.code,
+        signal: winner.signal,
+        stderrTail,
+        stdoutTail: rawStdoutTail || buffered,
+        env,
+      });
+      if (claudeDiagnostic) {
+        console.warn(
+          `[test:agent] ${def.name} → claude_diagnostic: ${claudeDiagnostic.detail}`,
+        );
+        return {
+          ok: false,
+          kind: 'agent_spawn_failed',
+          latencyMs,
+          model,
+          agentName: def.name,
+          detail: claudeDiagnostic.detail,
+        };
+      }
       const detail = redactSecrets(
         [
           winner.code != null ? `exit ${winner.code}` : null,

@@ -17,6 +17,7 @@ import type {
   MediaAspect,
   ProjectKind,
   ProjectMetadata,
+  ProjectPlatform,
   ProjectTemplate,
   MediaProviderCredentials,
   PromptTemplateSummary,
@@ -78,6 +79,45 @@ type PromptTemplatePick = {
 };
 
 type TranslateFn = (key: keyof Dict, vars?: Record<string, string | number>) => string;
+
+type NewProjectPlatform = Exclude<ProjectPlatform, 'auto'>;
+
+const DESIGN_PLATFORMS: Array<{
+  value: NewProjectPlatform;
+  label: string;
+  hint: string;
+}> = [
+  {
+    value: 'responsive',
+    label: 'Responsive web',
+    hint: 'One web experience adapted for desktop, tablet, and mobile browsers',
+  },
+  {
+    value: 'web-desktop',
+    label: 'Desktop web',
+    hint: 'Browser-first product or landing page',
+  },
+  {
+    value: 'mobile-ios',
+    label: 'iOS app',
+    hint: 'iPhone frames and iOS interaction rules',
+  },
+  {
+    value: 'mobile-android',
+    label: 'Android app',
+    hint: 'Pixel frames and Material interaction rules',
+  },
+  {
+    value: 'tablet',
+    label: 'Tablet app',
+    hint: 'Native-style tablet experience with split views',
+  },
+  {
+    value: 'desktop-app',
+    label: 'Desktop app',
+    hint: 'macOS/Windows app chrome',
+  },
+];
 
 export type CreateTab = 'prototype' | 'live-artifact' | 'deck' | 'template' | 'image' | 'video' | 'audio' | 'other';
 
@@ -198,6 +238,9 @@ export function NewProjectPanel({
   const [fidelity, setFidelity] = useState<'wireframe' | 'high-fidelity'>(
     'high-fidelity',
   );
+  const [platformTargets, setPlatformTargets] = useState<NewProjectPlatform[]>(['responsive']);
+  const [includeLandingPage, setIncludeLandingPage] = useState(false);
+  const [includeOsWidgets, setIncludeOsWidgets] = useState(false);
   const [speakerNotes, setSpeakerNotes] = useState(false);
   const [animations, setAnimations] = useState(false);
   const [templateId, setTemplateId] = useState<string | null>(null);
@@ -449,6 +492,9 @@ export function NewProjectPanel({
     const metadata = buildMetadata({
       tab,
       fidelity,
+      platformTargets,
+      includeLandingPage,
+      includeOsWidgets,
       speakerNotes,
       animations,
       templateId,
@@ -626,6 +672,20 @@ export function NewProjectPanel({
           />
         ) : null}
 
+        {tab === 'prototype' || tab === 'live-artifact' || tab === 'template' || tab === 'other' ? (
+          <PlatformPicker value={platformTargets} onChange={setPlatformTargets} />
+        ) : null}
+
+        {tab === 'prototype' || tab === 'live-artifact' || tab === 'template' || tab === 'other' ? (
+          <SurfaceOptions
+            includeLandingPage={includeLandingPage}
+            includeOsWidgets={includeOsWidgets}
+            osWidgetsAvailable={platformTargetsSupportOsWidgets(platformTargets)}
+            onIncludeLandingPage={setIncludeLandingPage}
+            onIncludeOsWidgets={setIncludeOsWidgets}
+          />
+        ) : null}
+
         {tab === 'prototype' || tab === 'live-artifact' ? (
           <FidelityPicker value={fidelity} onChange={setFidelity} />
         ) : null}
@@ -786,6 +846,88 @@ export function NewProjectPanel({
           onDismiss={() => setImportFolderError(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function PlatformPicker({
+  value,
+  onChange,
+}: {
+  value: NewProjectPlatform[];
+  onChange: (v: NewProjectPlatform[]) => void;
+}) {
+  function togglePlatform(next: NewProjectPlatform) {
+    const active = value.includes(next);
+    const updated = active
+      ? value.filter((item) => item !== next)
+      : [...value, next];
+    onChange(updated.length > 0 ? updated : ['responsive']);
+  }
+
+  return (
+    <div className="newproj-section">
+      <label className="newproj-label">Target platforms</label>
+      <p className="platform-picker-hint">
+        Pick one or more. Responsive web covers browser breakpoints only; add iOS,
+        Android, tablet app, or desktop app for native cross-platform variants.
+      </p>
+      <div className="platform-grid">
+        {DESIGN_PLATFORMS.map((option) => {
+          const active = value.includes(option.value);
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`newproj-card platform-card${active ? ' active' : ''}`}
+              onClick={() => togglePlatform(option.value)}
+              title={option.hint}
+              aria-pressed={active}
+            >
+              <span className="platform-card-title">{option.label}</span>
+              <span className="platform-card-hint">{option.hint}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SurfaceOptions({
+  includeLandingPage,
+  includeOsWidgets,
+  osWidgetsAvailable,
+  onIncludeLandingPage,
+  onIncludeOsWidgets,
+}: {
+  includeLandingPage: boolean;
+  includeOsWidgets: boolean;
+  osWidgetsAvailable: boolean;
+  onIncludeLandingPage: (v: boolean) => void;
+  onIncludeOsWidgets: (v: boolean) => void;
+}) {
+  const t = useT();
+  return (
+    <div className="newproj-section surface-options">
+      <label className="newproj-label">{t('newproj.surfaceOptionsLabel')}</label>
+      <ToggleRow
+        label={t('newproj.includeLandingPage')}
+        hint={t('newproj.includeLandingPageHint')}
+        checked={includeLandingPage}
+        onChange={onIncludeLandingPage}
+      />
+      <ToggleRow
+        label={t('newproj.includeOsWidgets')}
+        hint={
+          osWidgetsAvailable
+            ? t('newproj.includeOsWidgetsHint')
+            : t('newproj.includeOsWidgetsDisabledHint')
+        }
+        checked={osWidgetsAvailable && includeOsWidgets}
+        disabled={!osWidgetsAvailable}
+        onChange={onIncludeOsWidgets}
+      />
     </div>
   );
 }
@@ -984,18 +1126,21 @@ function ToggleRow({
   hint,
   checked,
   onChange,
+  disabled,
 }: {
   label: string;
   hint?: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: (v: boolean) => void;
 }) {
   return (
     <button
       type="button"
-      className={`toggle-row${checked ? ' on' : ''}`}
-      onClick={() => onChange(!checked)}
+      className={`toggle-row${checked ? ' on' : ''}${disabled ? ' disabled' : ''}`}
+      onClick={() => { if (!disabled) onChange(!checked); }}
       aria-pressed={checked}
+      disabled={disabled}
     >
       <div className="toggle-row-text">
         <span className="toggle-row-label">{label}</span>
@@ -2039,6 +2184,9 @@ function OptionCards<T extends string | number>({
 function buildMetadata(input: {
   tab: CreateTab;
   fidelity: 'wireframe' | 'high-fidelity';
+  platformTargets: NewProjectPlatform[];
+  includeLandingPage: boolean;
+  includeOsWidgets: boolean;
   speakerNotes: boolean;
   animations: boolean;
   templateId: string | null;
@@ -2057,12 +2205,25 @@ function buildMetadata(input: {
   promptTemplate: PromptTemplatePick | null;
 }): ProjectMetadata {
   const kind: ProjectKind = input.tab === 'live-artifact' ? 'prototype' : input.tab;
+  const selectedPlatforms = normalizeSelectedPlatforms(input.platformTargets);
+  const concreteTargets = platformTargetsFor(selectedPlatforms);
+  const canIncludeOsWidgets = platformTargetsSupportOsWidgets(concreteTargets);
+  const surfaceOptions = {
+    ...(input.includeLandingPage ? { includeLandingPage: true } : {}),
+    ...(input.includeOsWidgets && canIncludeOsWidgets ? { includeOsWidgets: true } : {}),
+  };
+  const base = {
+    platform: selectedPlatforms[0],
+    platformTargets: concreteTargets,
+    ...surfaceOptions,
+  };
   const inspirations = input.inspirationIds.length > 0
     ? { inspirationDesignSystemIds: input.inspirationIds }
     : {};
   if (input.tab === 'prototype' || input.tab === 'live-artifact') {
     return {
       kind,
+      ...base,
       fidelity: input.fidelity,
       ...(input.tab === 'live-artifact' ? { intent: 'live-artifact' as const } : {}),
       ...inspirations,
@@ -2073,13 +2234,14 @@ function buildMetadata(input: {
   }
   if (input.tab === 'template') {
     if (input.templateId == null) {
-      return { kind, animations: input.animations, ...inspirations };
+      return { kind, ...base, animations: input.animations, ...inspirations };
     }
     const tpl = input.templates.find((x) => x.id === input.templateId);
     // The fallback label is consumed by the agent prompt rather than the
     // UI, so we keep it in English to match the rest of the prompt corpus.
     return {
       kind,
+      ...base,
       animations: input.animations,
       templateId: input.templateId,
       templateLabel: tpl?.name ?? 'Saved template',
@@ -2116,7 +2278,56 @@ function buildMetadata(input: {
       ...inspirations,
     };
   }
-  return { kind: 'other', ...inspirations };
+  return { kind: 'other', ...base, ...inspirations };
+}
+
+function normalizeSelectedPlatforms(platforms: NewProjectPlatform[]): NewProjectPlatform[] {
+  const seen = new Set<NewProjectPlatform>();
+  for (const platform of platforms) {
+    if (DESIGN_PLATFORMS.some((option) => option.value === platform)) {
+      seen.add(platform);
+    }
+  }
+  return seen.size > 0 ? [...seen] : ['responsive'];
+}
+
+function platformTargetsSupportOsWidgets(platforms: ProjectPlatform[] | NewProjectPlatform[]): boolean {
+  return platforms.some((platform) =>
+    platform === 'mobile-ios'
+    || platform === 'mobile-android'
+    || platform === 'tablet',
+  );
+}
+
+function platformTargetsFor(platforms: NewProjectPlatform[]): ProjectPlatform[] {
+  const targets = new Set<ProjectPlatform>();
+  for (const platform of platforms) {
+    switch (platform) {
+      case 'responsive':
+        targets.add('responsive');
+        break;
+      case 'web-desktop':
+        targets.add('web-desktop');
+        break;
+      case 'mobile-ios':
+        targets.add('mobile-ios');
+        break;
+      case 'mobile-android':
+        targets.add('mobile-android');
+        break;
+      case 'tablet':
+        targets.add('tablet');
+        break;
+      case 'desktop-app':
+        targets.add('desktop-app');
+        break;
+      default: {
+        const exhaustive: never = platform;
+        targets.add(exhaustive);
+      }
+    }
+  }
+  return targets.size > 0 ? [...targets] : ['responsive'];
 }
 
 function buildPromptTemplateMetadata(

@@ -199,6 +199,7 @@ interface Props {
   error: string | null;
   projectId: string | null;
   projectFiles: ProjectFile[];
+  sendDisabled?: boolean;
   // Names that exist in the project folder. Tool cards and chips use this
   // set to decide whether a path can be opened as a tab.
   projectFileNames?: Set<string>;
@@ -229,6 +230,7 @@ interface Props {
   onContinueRemainingTasks?: (assistantMessage: ChatMessage, todos: TodoItem[]) => void;
   // Header "+" button — kicks off ProjectView's create-conversation flow.
   onNewConversation?: () => void;
+  newConversationDisabled?: boolean;
   // Conversation list that used to live in the topbar. The chat tab now
   // owns the list so users can browse + switch conversations without
   // leaving the pane.
@@ -260,6 +262,7 @@ type Tab = 'chat' | 'comments';
 export function ChatPane({
   messages,
   streaming,
+  sendDisabled = false,
   error,
   projectId,
   projectFiles,
@@ -277,6 +280,7 @@ export function ChatPane({
   onSubmitForm,
   onContinueRemainingTasks,
   onNewConversation,
+  newConversationDisabled = false,
   conversations,
   activeConversationId,
   onSelectConversation,
@@ -569,7 +573,9 @@ export function ChatPane({
                       type="button"
                       className="chat-history-new"
                       data-testid="conversation-history-new"
+                      disabled={newConversationDisabled}
                       onClick={() => {
+                        if (newConversationDisabled) return;
                         onNewConversation();
                         setShowConvList(false);
                       }}
@@ -611,7 +617,7 @@ export function ChatPane({
             title={t('chat.newConversationsTitle')}
             aria-label={t('chat.newConversation')}
             onClick={onNewConversation}
-            disabled={!onNewConversation}
+            disabled={!onNewConversation || newConversationDisabled}
           >
             <Icon name="plus" size={16} />
           </button>
@@ -731,7 +737,8 @@ export function ChatPane({
             projectId={projectId}
             projectFiles={projectFiles}
             skills={skills}
-            streaming={streaming || hasActiveRunMessage}
+            streaming={streaming}
+            sendDisabled={sendDisabled}
             initialDraft={initialDraft}
             onEnsureProject={onEnsureProject}
             commentAttachments={commentsToAttachments(attachedComments)}
