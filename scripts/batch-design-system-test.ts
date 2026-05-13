@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '..');
 const RUN_PREFIX = 'ds-batch-';
-const DEFAULT_AGENT_ID = 'claude';
+const FALLBACK_AGENT_ID = 'claude';
 const DEFAULT_KIND = 'prototype';
 const DEFAULT_PLATFORM = 'responsive';
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
@@ -94,6 +94,12 @@ interface DesignSystemsResponse {
   systems?: Array<{ id: string; title?: string }>;
 }
 
+interface AppConfigResponse {
+  config?: {
+    agentId?: string | null;
+  };
+}
+
 interface BatchResult {
   designSystemId: string;
   projectId: string;
@@ -122,7 +128,8 @@ Required input:
 Run/project options:
   --daemon <url>               Daemon base URL. Falls back to OD_DAEMON_URL,
                                OD_PORT, then tools-dev status discovery.
-  --agent <id>                 Agent id for /api/runs. Default: ${DEFAULT_AGENT_ID}.
+  --agent <id>                 Agent id for /api/runs. Default: daemon's saved
+                               app config agentId, then ${FALLBACK_AGENT_ID}.
   --skill <id|null>            Skill/design-template id to bind to each project.
   --model <id>                 Optional per-run model override.
   --reasoning <id>             Optional per-run reasoning override.
@@ -345,6 +352,20 @@ async function resolveDesignSystems(daemonUrl: string, config: BatchConfig): Pro
   return [...new Set(ids)];
 }
 
+async function resolveAgentId(daemonUrl: string, config: BatchConfig): Promise<string> {
+  if (typeof config.agentId === 'string' && config.agentId.trim()) return config.agentId.trim();
+  try {
+    const body = await api<AppConfigResponse>(daemonUrl, 'GET', '/api/app-config');
+    const configured = body.config?.agentId;
+    if (typeof configured === 'string' && configured.trim()) return configured.trim();
+  } catch (err) {
+    process.stderr.write(
+      `warning: could not read daemon app config; falling back to ${FALLBACK_AGENT_ID}: ${(err as Error).message || String(err)}\n`,
+    );
+  }
+  return FALLBACK_AGENT_ID;
+}
+
 function makeProjectId(designSystemId: string): string {
   const ts = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 7);
@@ -480,9 +501,10 @@ async function main(): Promise<void> {
   const daemonUrl = await resolveDaemonUrl(config);
   const prompt = await resolvePrompt(config);
   const designSystems = await resolveDesignSystems(daemonUrl, config);
+  const agentId = await resolveAgentId(daemonUrl, config);
   const resolved = {
     ...config,
-    agentId: config.agentId ?? DEFAULT_AGENT_ID,
+    agentId,
     startRuns: config.startRuns ?? true,
     wait: config.wait ?? true,
     skipDiscoveryBrief: config.skipDiscoveryBrief ?? true,
