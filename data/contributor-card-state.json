@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-15T02:32:41.441Z",
+  "generatedAt": "2026-05-15T02:33:49.776Z",
   "contributors": {
     "huyhoangnhh98": {
       "lastAnnouncedTier": "spark",
@@ -111,8 +111,9 @@
     },
     "jinmeihong0201-gif": {
       "lastAnnouncedTier": "signal",
-      "lastKnownScore": 17,
-      "lastCheckedAt": "2026-05-13T14:34:30.268Z",
+      "lastKnownScore": 102,
+      "lastCheckedAt": "2026-05-15T02:33:49.775Z",
+      "scoreVersion": "weighted-v1",
       "lastAnnouncedAt": "2026-05-12T09:01:12.284Z"
     },
     "yiyan-jiang": {
