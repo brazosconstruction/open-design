@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-17T15:22:19.739Z",
+  "generatedAt": "2026-05-17T15:24:43.822Z",
   "contributors": {
     "huyhoangnhh98": {
       "lastAnnouncedTier": "spark",
@@ -323,8 +323,9 @@
     },
     "fredb34670": {
       "lastAnnouncedTier": "spark",
-      "lastKnownScore": 1,
-      "lastCheckedAt": "2026-05-13T15:24:00.142Z",
+      "lastKnownScore": 17,
+      "lastCheckedAt": "2026-05-17T15:24:43.822Z",
+      "scoreVersion": "weighted-v1",
       "lastAnnouncedAt": "2026-05-13T15:24:00.142Z"
     },
     "romantin": {
