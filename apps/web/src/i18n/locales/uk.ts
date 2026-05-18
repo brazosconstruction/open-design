@@ -106,6 +106,8 @@ export const uk: Dict = {
   'settings.agentConnectCheckBrowser':
     'Підтвердьте запит у вкладці браузера, яка щойно відкрилася.',
   'settings.agentDisconnect': 'Від’єднати',
+  'settings.agentDisconnected': 'Від’єднано',
+  'settings.agentDisconnectFailed': 'Не вдалося від’єднати',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'Швидко заповнити провайдера',
   'settings.customProvider': 'Власний провайдер',

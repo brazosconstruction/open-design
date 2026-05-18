@@ -104,6 +104,8 @@ export const id: Dict = {
   'settings.agentConnectCheckBrowser':
     'Setujui permintaan di tab peramban yang baru saja terbuka.',
   'settings.agentDisconnect': 'Putuskan',
+  'settings.agentDisconnected': 'Terputus',
+  'settings.agentDisconnectFailed': 'Gagal memutuskan',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'Provider isi cepat',
   'settings.customProvider': 'Provider kustom',

@@ -102,6 +102,8 @@ export const en: Dict = {
   'settings.agentConnectCheckBrowser':
     'Approve the request in the browser tab that just opened.',
   'settings.agentDisconnect': 'Disconnect',
+  'settings.agentDisconnected': 'Disconnected',
+  'settings.agentDisconnectFailed': 'Disconnect failed',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'Quick fill provider',
   'settings.customProvider': 'Custom provider',

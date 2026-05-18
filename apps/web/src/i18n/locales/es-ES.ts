@@ -105,6 +105,8 @@ export const esES: Dict = {
   'settings.agentConnectCheckBrowser':
     'Aprueba la solicitud en la pestaña del navegador que se acaba de abrir.',
   'settings.agentDisconnect': 'Desconectar',
+  'settings.agentDisconnected': 'Desconectado',
+  'settings.agentDisconnectFailed': 'Error al desconectar',
   'settings.apiSection': 'API de Anthropic',
   'settings.quickFillProvider': 'Rellenar proveedor',
   'settings.customProvider': 'Proveedor personalizado',

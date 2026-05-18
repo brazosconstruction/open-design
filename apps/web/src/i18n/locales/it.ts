@@ -96,6 +96,16 @@ export const it: Dict = {
   'settings.agentInstall.stepSelect': 'Seleziona la scheda dell\'agente una volta che appare come installato.',
   'settings.noAgentsDetected':
     'Nessun agente rilevato per ora. Installa Claude Code, Codex, Devin for Terminal, Gemini CLI, OpenCode, Cursor Agent, Qwen o GitHub Copilot CLI, poi clicca su Rianalizza.',
+  'settings.agentAuthRequired': 'Autenticazione richiesta',
+  'settings.agentAuthUnknown': 'Stato autenticazione sconosciuto',
+  'settings.agentConnect': 'Connetti',
+  'settings.agentConnecting': 'In attesa del browser…',
+  'settings.agentConnectFailed': 'Connessione non riuscita',
+  'settings.agentConnectCheckBrowser':
+    'Approva la richiesta nella scheda del browser appena aperta.',
+  'settings.agentDisconnect': 'Disconnetti',
+  'settings.agentDisconnected': 'Disconnesso',
+  'settings.agentDisconnectFailed': 'Disconnessione non riuscita',
   'settings.apiSection': 'API Anthropic',
   'settings.quickFillProvider': 'Compilazione rapida del provider',
   'settings.customProvider': 'Provider personalizzato',

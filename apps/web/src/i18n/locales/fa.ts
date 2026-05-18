@@ -105,6 +105,8 @@ export const fa: Dict = {
   'settings.agentConnectCheckBrowser':
     'درخواست را در زبانهٔ مرورگری که اکنون باز شد تأیید کنید.',
   'settings.agentDisconnect': 'قطع اتصال',
+  'settings.agentDisconnected': 'اتصال قطع شد',
+  'settings.agentDisconnectFailed': 'قطع اتصال ناموفق بود',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'پر کردن سریع ارائه‌دهنده',
   'settings.customProvider': 'ارائه‌دهنده سفارشی',

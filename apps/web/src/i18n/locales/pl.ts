@@ -105,6 +105,8 @@ export const pl: Dict = {
   'settings.agentConnectCheckBrowser':
     'Zatwierdź żądanie w karcie przeglądarki, która właśnie się otworzyła.',
   'settings.agentDisconnect': 'Rozłącz',
+  'settings.agentDisconnected': 'Rozłączono',
+  'settings.agentDisconnectFailed': 'Rozłączenie nie powiodło się',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'Szybkie wypełnienie dostawcy',
   'settings.customProvider': 'Niestandardowy dostawca',

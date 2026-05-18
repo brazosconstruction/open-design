@@ -817,6 +817,78 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     });
   });
 
+  it('disconnects AMR credentials from the Local CLI card without waiting on rescan', async () => {
+    const amrAgent: AgentInfo = {
+      id: 'amr',
+      name: 'AMR',
+      bin: 'amr',
+      available: true,
+      authStatus: 'ok',
+      version: '0.1.0',
+      models: [{ id: 'default', label: 'Default' }],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input.toString();
+        if (url === '/api/memory') {
+          return new Response(
+            JSON.stringify({ enabled: true, memories: [], extraction: null }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        expect(url).toBe('/api/integrations/amr/disconnect');
+        expect(init?.method).toBe('POST');
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const rescan = deferred<AgentInfo[]>();
+    const onRefreshAgents = vi.fn(() => rescan.promise);
+
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'amr' },
+      { agents: [amrAgent], onRefreshAgents },
+    );
+
+    fireEvent.click(
+      screen.getByRole('tab', { name: /Local CLI.*1 installed/i }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: en['settings.agentDisconnect'] }),
+    );
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/integrations/amr/disconnect',
+        {
+          method: 'POST',
+        },
+      );
+    });
+    await waitFor(() => {
+      expect(onRefreshAgents).toHaveBeenCalledWith({
+        throwOnError: true,
+        agentCliEnv: {},
+      });
+    });
+    expect(screen.getByText(en['settings.agentDisconnected'])).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: en['settings.agentDisconnect'] }),
+    ).toBeNull();
+    expect(
+      screen.getByRole('button', { name: en['settings.agentConnect'] }),
+    ).toBeTruthy();
+    expect(screen.queryByText('Scanning...')).toBeNull();
+    expect(
+      (screen.getByRole('button', { name: /Rescan/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    rescan.resolve([{ ...amrAgent, authStatus: 'missing' as const }]);
+  });
+
   it('renders an error notice when rescan fails', async () => {
     const onRefreshAgents = vi.fn(async () => {
       throw new Error('boom');

@@ -105,6 +105,8 @@ export const hu: Dict = {
   'settings.agentConnectCheckBrowser':
     'Hagyd jóvá a kérést az imént megnyílt böngészőfülön.',
   'settings.agentDisconnect': 'Lecsatlakozás',
+  'settings.agentDisconnected': 'Lecsatlakoztatva',
+  'settings.agentDisconnectFailed': 'A lecsatlakozás sikertelen',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'Szolgáltató gyors kitöltése',
   'settings.customProvider': 'Egyéni szolgáltató',

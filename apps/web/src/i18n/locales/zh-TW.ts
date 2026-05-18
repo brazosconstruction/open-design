@@ -103,6 +103,8 @@ export const zhTW: Dict = {
   'settings.agentConnectFailed': '連線失敗',
   'settings.agentConnectCheckBrowser': '請在剛打開的瀏覽器分頁中確認授權。',
   'settings.agentDisconnect': '中斷連線',
+  'settings.agentDisconnected': '已中斷連線',
+  'settings.agentDisconnectFailed': '中斷連線失敗',
   'settings.apiSection': 'API 設定',
   'settings.quickFillProvider': '快速填入提供方',
   'settings.customProvider': '自訂提供方',

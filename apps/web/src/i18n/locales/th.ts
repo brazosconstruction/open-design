@@ -101,6 +101,8 @@ export const th: Dict = {
   'settings.agentConnectFailed': 'เชื่อมต่อล้มเหลว',
   'settings.agentConnectCheckBrowser': 'โปรดอนุมัติคำขอในแท็บเบราว์เซอร์ที่เพิ่งเปิดขึ้น',
   'settings.agentDisconnect': 'ยกเลิกการเชื่อมต่อ',
+  'settings.agentDisconnected': 'ยกเลิกการเชื่อมต่อแล้ว',
+  'settings.agentDisconnectFailed': 'ยกเลิกการเชื่อมต่อล้มเหลว',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'เลือกผู้ให้บริการอย่างรวดเร็ว',
   'settings.customProvider': 'กำหนดผู้ให้บริการเอง',

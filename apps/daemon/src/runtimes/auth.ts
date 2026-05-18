@@ -1,7 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { execAgentFile } from './invocation.js';
+import { getDefaultAmrCredentials } from '../integrations/amr/credentials.js';
 import type { RuntimeEnv } from './types.js';
 
 export type AgentAuthProbeResult = {
@@ -20,43 +18,6 @@ export function cursorAuthGuidance(): string {
 
 export function amrAuthGuidance(): string {
   return AMR_AUTH_GUIDANCE;
-}
-
-function cleanString(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function expandHome(input: string): string {
-  if (input === '~') return os.homedir();
-  if (input.startsWith('~/')) return path.join(os.homedir(), input.slice(2));
-  return input;
-}
-
-function amrSessionPath(env: RuntimeEnv): string {
-  const configured = cleanString((env as Record<string, unknown>).AMR_SESSION);
-  if (configured) return path.resolve(expandHome(configured));
-  return path.join(os.homedir(), '.amr', 'session.json');
-}
-
-function hasAmrSessionToken(env: RuntimeEnv): boolean {
-  const envRecord = env as Record<string, unknown>;
-  if (cleanString(envRecord.AMR_TOKEN) || cleanString(envRecord.AMR_API_KEY)) {
-    return true;
-  }
-  const file = amrSessionPath(env);
-  if (!existsSync(file)) return false;
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-    return Boolean(
-      cleanString(parsed.token) ||
-      cleanString(parsed.api_key) ||
-      cleanString(parsed.access_token),
-    );
-  } catch {
-    return false;
-  }
 }
 
 export function isCursorAuthFailureText(text: string): boolean {
@@ -124,7 +85,7 @@ export async function probeAgentAuthStatus(
   env: RuntimeEnv,
 ): Promise<AgentAuthProbeResult | null> {
   if (agentId === 'amr') {
-    return hasAmrSessionToken(env)
+    return getDefaultAmrCredentials(env)
       ? { status: 'ok' }
       : { status: 'missing', message: amrAuthGuidance() };
   }

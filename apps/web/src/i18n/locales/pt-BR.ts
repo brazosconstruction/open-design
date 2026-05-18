@@ -105,6 +105,8 @@ export const ptBR: Dict = {
   'settings.agentConnectCheckBrowser':
     'Aprove a solicitação na aba do navegador que acabou de abrir.',
   'settings.agentDisconnect': 'Desconectar',
+  'settings.agentDisconnected': 'Desconectado',
+  'settings.agentDisconnectFailed': 'Falha ao desconectar',
   'settings.apiSection': 'API da Anthropic',
   'settings.quickFillProvider': 'Preencher provedor',
   'settings.customProvider': 'Provedor personalizado',

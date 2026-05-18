@@ -129,6 +129,8 @@ export interface Dict {
   'settings.agentConnectFailed': string;
   'settings.agentConnectCheckBrowser': string;
   'settings.agentDisconnect': string;
+  'settings.agentDisconnected': string;
+  'settings.agentDisconnectFailed': string;
   'settings.apiSection': string;
   'settings.quickFillProvider': string;
   'settings.customProvider': string;

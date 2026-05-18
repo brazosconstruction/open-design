@@ -4954,10 +4954,40 @@ a.avatar-item:visited {
   cursor: progress;
   opacity: 0.7;
 }
+.agent-card-disconnect {
+  margin-left: 8px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.agent-card-disconnect:hover {
+  color: var(--danger, #c0392b);
+  border-color: color-mix(
+    in srgb,
+    var(--danger, #c0392b) 34%,
+    var(--border)
+  );
+  background: color-mix(in srgb, var(--danger, #c0392b) 8%, transparent);
+}
+.agent-card-disconnect[aria-disabled="true"] {
+  cursor: progress;
+  opacity: 0.7;
+}
 .agent-card-connect-error {
   margin-left: 8px;
   color: var(--danger, #c0392b);
   font-size: 11px;
+}
+.agent-card-action-notice {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.agent-card-action-notice.success {
+  color: var(--success, #1f8f4d);
+}
+.agent-card-action-notice.error {
+  color: var(--danger, #c0392b);
 }
 .agent-install-commands {
   display: flex;

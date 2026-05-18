@@ -105,6 +105,8 @@ export const fr: Dict = {
   'settings.agentConnectCheckBrowser':
     'Approuvez la demande dans l’onglet du navigateur qui vient de s’ouvrir.',
   'settings.agentDisconnect': 'Déconnecter',
+  'settings.agentDisconnected': 'Déconnecté',
+  'settings.agentDisconnectFailed': 'Échec de la déconnexion',
   'settings.apiSection': 'API Anthropic',
   'settings.quickFillProvider': 'Remplissage rapide du fournisseur',
   'settings.customProvider': 'Fournisseur personnalisé',

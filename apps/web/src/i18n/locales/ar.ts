@@ -105,6 +105,8 @@ export const ar: Dict = {
   'settings.agentConnectCheckBrowser':
     'وافق على الطلب في علامة تبويب المتصفح التي فُتحت للتو.',
   'settings.agentDisconnect': 'قطع الاتصال',
+  'settings.agentDisconnected': 'تم قطع الاتصال',
+  'settings.agentDisconnectFailed': 'فشل قطع الاتصال',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'ملء المزوّد سريعًا',
   'settings.customProvider': 'مزوّد مخصص',

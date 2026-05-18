@@ -16,6 +16,7 @@ import {
   upsertAmrCredentials,
 } from '../src/integrations/amr/credentials.js';
 import { ensureOpenDesignAmrAgent } from '../src/integrations/amr/agents.js';
+import { probeAgentAuthStatus } from '../src/runtimes/auth.js';
 import { closeDatabase, openDatabase } from '../src/db.js';
 
 const tempDirs: string[] = [];
@@ -145,6 +146,31 @@ test('reads current AMR session file shape and normalizes env for CLI runs', () 
     AMR_API_KEY: 'amr-token',
     AMR_GATEWAY_URL: 'http://127.0.0.1:8787',
   });
+});
+
+test('reports AMR disconnected when only the raw CLI session remains', async () => {
+  const dir = tempDir('od-amr-disconnect-session-');
+  const sessionPath = path.join(dir, 'session.json');
+  fs.writeFileSync(
+    sessionPath,
+    JSON.stringify({
+      gateway: 'http://127.0.0.1:8787/',
+      api_key: 'amr-token',
+    }),
+    'utf8',
+  );
+  const env = { AMR_SESSION: sessionPath };
+
+  assert.equal(
+    (await probeAgentAuthStatus('amr', 'amr', env))?.status,
+    'missing',
+  );
+
+  const credentials = readAmrSessionFile(env);
+  assert.ok(credentials);
+  setDefaultAmrCredentials(credentials);
+
+  assert.equal((await probeAgentAuthStatus('amr', 'amr', env))?.status, 'ok');
 });
 
 test('persists AMR credentials in SQLite and clears stale tokens', () => {

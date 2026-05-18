@@ -105,6 +105,8 @@ export const ru: Dict = {
   'settings.agentConnectCheckBrowser':
     'Подтвердите запрос во вкладке браузера, которая только что открылась.',
   'settings.agentDisconnect': 'Отключить',
+  'settings.agentDisconnected': 'Отключено',
+  'settings.agentDisconnectFailed': 'Не удалось отключить',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'Быстро заполнить провайдера',
   'settings.customProvider': 'Пользовательский провайдер',

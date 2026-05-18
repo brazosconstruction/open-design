@@ -105,6 +105,8 @@ export const ja: Dict = {
   'settings.agentConnectCheckBrowser':
     '開いたブラウザタブで承認してください。',
   'settings.agentDisconnect': '切断',
+  'settings.agentDisconnected': '切断しました',
+  'settings.agentDisconnectFailed': '切断に失敗しました',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'プロバイダーをクイック入力',
   'settings.customProvider': 'カスタムプロバイダー',

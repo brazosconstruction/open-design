@@ -105,6 +105,8 @@ export const de: Dict = {
   'settings.agentConnectCheckBrowser':
     'Bestätige die Anfrage im soeben geöffneten Browser-Tab.',
   'settings.agentDisconnect': 'Trennen',
+  'settings.agentDisconnected': 'Getrennt',
+  'settings.agentDisconnectFailed': 'Trennen fehlgeschlagen',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'Anbieter schnell ausfüllen',
   'settings.customProvider': 'Benutzerdefinierter Anbieter',

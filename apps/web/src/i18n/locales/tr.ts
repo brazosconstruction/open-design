@@ -105,6 +105,8 @@ export const tr: Dict = {
   'settings.agentConnectCheckBrowser':
     'Az önce açılan tarayıcı sekmesinde isteği onaylayın.',
   'settings.agentDisconnect': 'Bağlantıyı kes',
+  'settings.agentDisconnected': 'Bağlantı kesildi',
+  'settings.agentDisconnectFailed': 'Bağlantı kesilemedi',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': 'Sağlayıcıyı hızlı doldur',
   'settings.customProvider': 'Özel sağlayıcı',

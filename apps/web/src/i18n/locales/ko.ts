@@ -104,6 +104,8 @@ export const ko: Dict = {
   'settings.agentConnectFailed': '연결 실패',
   'settings.agentConnectCheckBrowser': '방금 열린 브라우저 탭에서 승인하세요.',
   'settings.agentDisconnect': '연결 해제',
+  'settings.agentDisconnected': '연결 해제됨',
+  'settings.agentDisconnectFailed': '연결 해제 실패',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': '제공자 빠른 입력',
   'settings.customProvider': '사용자 지정 제공자',

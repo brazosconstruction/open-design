@@ -101,6 +101,8 @@ export const zhCN: Dict = {
   'settings.agentConnectFailed': '连接失败',
   'settings.agentConnectCheckBrowser': '请在刚打开的浏览器标签页中确认授权。',
   'settings.agentDisconnect': '断开连接',
+  'settings.agentDisconnected': '已断开连接',
+  'settings.agentDisconnectFailed': '断开连接失败',
   'settings.apiSection': 'Anthropic API',
   'settings.quickFillProvider': '快速填充提供方',
   'settings.customProvider': '自定义提供方',

@@ -67,6 +67,7 @@ import type {
 } from '../types';
 import { testAgent, testApiProvider } from '../providers/connection-test';
 import {
+  disconnectAgentIntegration,
   fetchAgentIntegrationStatus,
   startAgentIntegrationConnect,
 } from '../providers/daemon';
@@ -228,6 +229,14 @@ function sanitizeHttpsUrl(url: string | undefined): string | undefined {
 type RescanNotice =
   | { kind: 'success'; count: number }
   | { kind: 'error' };
+
+type AgentAuthStatus = NonNullable<AgentInfo['authStatus']>;
+
+type AgentActionNotice = {
+  id: string;
+  kind: 'success' | 'error';
+  message: string;
+};
 
 type TestState =
   | { status: 'idle' }
@@ -710,9 +719,17 @@ export function SettingsDialog({
   const [agentConnectingId, setAgentConnectingId] = useState<string | null>(
     null,
   );
+  const [agentDisconnectingId, setAgentDisconnectingId] = useState<
+    string | null
+  >(null);
   const [agentConnectError, setAgentConnectError] = useState<
     { id: string; message: string } | null
   >(null);
+  const [agentActionNotice, setAgentActionNotice] =
+    useState<AgentActionNotice | null>(null);
+  const [agentAuthOverrides, setAgentAuthOverrides] = useState<
+    Record<string, AgentAuthStatus>
+  >({});
   // Tracks the active poll loop so the effect that runs while a connect is
   // in progress can cancel itself when the dialog unmounts or the user
   // gives up.
@@ -823,6 +840,25 @@ export function SettingsDialog({
     return () => window.clearTimeout(id);
   }, [agentRescanNotice]);
   useEffect(() => {
+    if (!agentActionNotice) return;
+    const id = window.setTimeout(() => setAgentActionNotice(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [agentActionNotice]);
+  useEffect(() => {
+    setAgentAuthOverrides((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [agentId, authStatus] of Object.entries(prev)) {
+        const agent = agents.find((a) => a.id === agentId);
+        if (!agent || agent.authStatus === authStatus) {
+          delete next[agentId];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [agents]);
+  useEffect(() => {
     providerTestRevisionRef.current += 1;
     setProviderTestState((state) =>
       state.status === 'running' ? state : { status: 'idle' },
@@ -908,7 +944,7 @@ export function SettingsDialog({
   const AGENTS_WITH_DAEMON_CONNECT = useMemo(() => new Set(['amr']), []);
   const handleConnectAgent = useCallback(
     async (agentId: string) => {
-      if (agentConnectingId) return;
+      if (agentConnectingId || agentDisconnectingId) return;
       // Mark any prior poll as cancelled so a stale tick can't flip state
       // after the new flow has started.
       if (agentConnectAbortRef.current) {
@@ -918,6 +954,7 @@ export function SettingsDialog({
       agentConnectAbortRef.current = abort;
       setAgentConnectingId(agentId);
       setAgentConnectError(null);
+      setAgentActionNotice(null);
       const started = await startAgentIntegrationConnect(agentId);
       if (!started.ok) {
         abort.cancelled = true;
@@ -927,10 +964,11 @@ export function SettingsDialog({
       }
       if (started.alreadyConnected) {
         abort.cancelled = true;
+        setAgentAuthOverrides((prev) => ({ ...prev, [agentId]: 'ok' }));
         setAgentConnectingId(null);
-        try {
-          await onRefreshAgents(agentRefreshOptionsForConfig(cfg));
-        } catch {}
+        void Promise.resolve(
+          onRefreshAgents(agentRefreshOptionsForConfig(cfg)),
+        ).catch(() => {});
         return;
       }
       const startedAt = Date.now();
@@ -942,10 +980,11 @@ export function SettingsDialog({
         const status = await fetchAgentIntegrationStatus(agentId);
         if (abort.cancelled) return;
         if (status?.connected) {
+          setAgentAuthOverrides((prev) => ({ ...prev, [agentId]: 'ok' }));
           setAgentConnectingId(null);
-          try {
-            await onRefreshAgents(agentRefreshOptionsForConfig(cfg));
-          } catch {}
+          void Promise.resolve(
+            onRefreshAgents(agentRefreshOptionsForConfig(cfg)),
+          ).catch(() => {});
           return;
         }
         if (status?.connectState.status === 'error') {
@@ -965,7 +1004,50 @@ export function SettingsDialog({
         });
       }
     },
-    [agentConnectingId, cfg, onRefreshAgents, t],
+    [agentConnectingId, agentDisconnectingId, cfg, onRefreshAgents, t],
+  );
+  const handleDisconnectAgent = useCallback(
+    async (agentId: string) => {
+      if (agentConnectingId || agentDisconnectingId) return;
+      if (agentConnectAbortRef.current) {
+        agentConnectAbortRef.current.cancelled = true;
+        agentConnectAbortRef.current = null;
+      }
+      setAgentDisconnectingId(agentId);
+      setAgentConnectError(null);
+      setAgentActionNotice(null);
+      const ok = await disconnectAgentIntegration(agentId);
+      if (ok) {
+        setAgentAuthOverrides((prev) => ({ ...prev, [agentId]: 'missing' }));
+        setAgentActionNotice({
+          id: agentId,
+          kind: 'success',
+          message: t('settings.agentDisconnected'),
+        });
+        setAgentDisconnectingId(null);
+        void Promise.resolve(
+          onRefreshAgents(agentRefreshOptionsForConfig(cfg)),
+        ).catch(() => {
+          setAgentActionNotice({
+            id: agentId,
+            kind: 'error',
+            message: t('settings.rescanFailed'),
+          });
+        });
+        return;
+      }
+      setAgentConnectError({
+        id: agentId,
+        message: t('settings.agentDisconnectFailed'),
+      });
+      setAgentActionNotice({
+        id: agentId,
+        kind: 'error',
+        message: t('settings.agentDisconnectFailed'),
+      });
+      setAgentDisconnectingId(null);
+    },
+    [agentConnectingId, agentDisconnectingId, cfg, onRefreshAgents, t],
   );
   useEffect(() => {
     return () => {
@@ -2006,6 +2088,17 @@ export function SettingsDialog({
                   <div className="agent-grid">
                     {agents.flatMap((a) => {
                       const active = cfg.agentId === a.id;
+                      const hasDaemonConnect =
+                        AGENTS_WITH_DAEMON_CONNECT.has(a.id);
+                      const effectiveAuthStatus =
+                        agentAuthOverrides[a.id] ?? a.authStatus;
+                      const agentActionBusy =
+                        agentConnectingId === a.id ||
+                        agentDisconnectingId === a.id;
+                      const cardActionNotice =
+                        agentActionNotice?.id === a.id
+                          ? agentActionNotice
+                          : null;
                       const cardEl = a.available ? (
                         <button
                           type="button"
@@ -2031,20 +2124,20 @@ export function SettingsDialog({
                           <div className="agent-card-body">
                             <div className="agent-card-name">{a.name}</div>
                             <div className="agent-card-meta">
-                              {a.authStatus === 'missing' ? (
+                              {effectiveAuthStatus === 'missing' ? (
                                 <>
                                   <span title={a.authMessage ?? a.path ?? ''}>
                                     {agentConnectingId === a.id
                                       ? t('settings.agentConnecting')
                                       : t('settings.agentAuthRequired')}
                                   </span>
-                                  {AGENTS_WITH_DAEMON_CONNECT.has(a.id) ? (
+                                  {hasDaemonConnect ? (
                                     <span
                                       role="button"
                                       tabIndex={0}
                                       className="agent-card-link agent-card-link--ghost agent-card-connect"
                                       aria-disabled={
-                                        agentConnectingId === a.id || undefined
+                                        agentActionBusy || undefined
                                       }
                                       title={
                                         agentConnectingId === a.id
@@ -2053,14 +2146,16 @@ export function SettingsDialog({
                                       }
                                       onClick={(ev) => {
                                         ev.stopPropagation();
-                                        if (agentConnectingId) return;
+                                        if (agentConnectingId || agentDisconnectingId) return;
                                         void handleConnectAgent(a.id);
                                       }}
                                       onKeyDown={(ev) => {
-                                        if (ev.key !== 'Enter' && ev.key !== ' ') return;
+                                        if (ev.key !== 'Enter' && ev.key !== ' ')
+                                          return;
                                         ev.preventDefault();
                                         ev.stopPropagation();
-                                        if (agentConnectingId) return;
+                                        if (agentConnectingId || agentDisconnectingId)
+                                          return;
                                         void handleConnectAgent(a.id);
                                       }}
                                     >
@@ -2079,17 +2174,66 @@ export function SettingsDialog({
                                     </span>
                                   ) : null}
                                 </>
-                              ) : a.authStatus === 'unknown' ? (
+                              ) : effectiveAuthStatus === 'unknown' ? (
                                 <span title={a.authMessage ?? a.path ?? ''}>
                                   {t('settings.agentAuthUnknown')}
                                 </span>
-                              ) : a.version ? (
-                                <span title={a.path ?? ''}>{a.version}</span>
                               ) : (
-                                <span title={a.path ?? ''}>
-                                  {t('common.installed')}
-                                </span>
+                                <>
+                                  {a.version ? (
+                                    <span title={a.path ?? ''}>{a.version}</span>
+                                  ) : (
+                                    <span title={a.path ?? ''}>
+                                      {t('common.installed')}
+                                    </span>
+                                  )}
+                                  {hasDaemonConnect &&
+                                  effectiveAuthStatus === 'ok' ? (
+                                    <span
+                                      role="button"
+                                      tabIndex={0}
+                                      className="agent-card-link agent-card-link--ghost agent-card-disconnect"
+                                      aria-disabled={
+                                        agentActionBusy || undefined
+                                      }
+                                      title={t('settings.agentDisconnect')}
+                                      onClick={(ev) => {
+                                        ev.stopPropagation();
+                                        if (agentConnectingId || agentDisconnectingId)
+                                          return;
+                                        void handleDisconnectAgent(a.id);
+                                      }}
+                                      onKeyDown={(ev) => {
+                                        if (ev.key !== 'Enter' && ev.key !== ' ')
+                                          return;
+                                        ev.preventDefault();
+                                        ev.stopPropagation();
+                                        if (agentConnectingId || agentDisconnectingId)
+                                          return;
+                                        void handleDisconnectAgent(a.id);
+                                      }}
+                                    >
+                                      {t('settings.agentDisconnect')}
+                                    </span>
+                                  ) : null}
+                                </>
                               )}
+                              {cardActionNotice ? (
+                                <span
+                                  className={
+                                    'agent-card-action-notice ' +
+                                    cardActionNotice.kind
+                                  }
+                                  role={
+                                    cardActionNotice.kind === 'error'
+                                      ? 'alert'
+                                      : 'status'
+                                  }
+                                  title={cardActionNotice.message}
+                                >
+                                  {cardActionNotice.message}
+                                </span>
+                              ) : null}
                             </div>
                           </div>
                           <span
