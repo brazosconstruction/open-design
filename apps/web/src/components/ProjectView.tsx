@@ -25,6 +25,7 @@ import {
   fetchPreviewComments,
   fetchDesignSystem,
   fetchDesignTemplate,
+  fetchProjectDesignSystemPackageAudit,
   fetchLiveArtifacts,
   fetchProjectFiles,
   fetchSkill,
@@ -52,6 +53,10 @@ import { randomUUID } from '../utils/uuid';
 import { DEFAULT_NOTIFICATIONS } from '../state/config';
 import type { TodoItem } from '../runtime/todos';
 import { appendErrorStatusEvent } from '../runtime/chat-events';
+import {
+  buildDesignSystemPackageAuditRepairPrompt,
+  summarizeDesignSystemPackageAudit,
+} from '../runtime/design-system-package-audit';
 import { isLiveArtifactTabId, liveArtifactTabId } from '../types';
 import {
   DESIGN_SYSTEM_WORKSPACE_DISPLAY_TITLE,
@@ -308,6 +313,10 @@ function clearAutoSendSession(projectId: string): void {
   }
 }
 
+function isDesignSystemWorkspaceMetadata(metadata: ProjectMetadata | undefined): boolean {
+  return metadata?.importedFrom === 'design-system';
+}
+
 function isStoredChatAttachment(value: unknown): value is ChatAttachment {
   if (value === null || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
@@ -449,6 +458,7 @@ export function ProjectView({
     details: string | null;
     code?: string | null;
   } | null>(null);
+  const [chatSeed, setChatSeed] = useState<{ id: string; value: string } | null>(null);
   const [chatPanelWidth, setChatPanelWidth] = useState(readSavedChatPanelWidth);
   const [chatPanelMaxWidth, setChatPanelMaxWidth] = useState(MAX_CHAT_PANEL_WIDTH);
   const [workspacePanelMinWidth, setWorkspacePanelMinWidth] = useState(MIN_WORKSPACE_PANEL_WIDTH);
@@ -516,6 +526,9 @@ export function ProjectView({
   const projectIdRef = useRef(project.id);
   useEffect(() => {
     projectIdRef.current = project.id;
+  }, [project.id]);
+  useEffect(() => {
+    setChatSeed(null);
   }, [project.id]);
   // Monotonic token bumped on every `conversation-created` refresh dispatch.
   // Two rapid events (e.g. concurrent routine runs against the same reused
@@ -1260,6 +1273,45 @@ export function ProjectView({
     [updateMessageById],
   );
 
+  const auditDesignSystemWorkspaceAfterRun = useCallback(
+    async (assistantMessageId: string) => {
+      if (!isDesignSystemWorkspaceMetadata(project.metadata)) return;
+      try {
+        const audit = await fetchProjectDesignSystemPackageAudit(project.id);
+        if (!audit) return;
+        const auditSummary = summarizeDesignSystemPackageAudit(audit);
+        updateMessageById(
+          assistantMessageId,
+          (prev) => ({
+            ...prev,
+            events: [...(prev.events ?? []), { kind: 'status', label: 'audit', detail: auditSummary }],
+          }),
+          true,
+          { telemetryFinalized: true },
+        );
+        const repairPrompt = buildDesignSystemPackageAuditRepairPrompt(audit);
+        if (repairPrompt) {
+          setChatSeed({ id: `audit-${Date.now()}`, value: repairPrompt });
+        }
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        updateMessageById(
+          assistantMessageId,
+          (prev) => ({
+            ...prev,
+            events: [
+              ...(prev.events ?? []),
+              { kind: 'status', label: 'audit', detail: `Package audit could not run: ${detail}` },
+            ],
+          }),
+          true,
+          { telemetryFinalized: true },
+        );
+      }
+    },
+    [project.id, project.metadata, updateMessageById],
+  );
+
   const refreshPreviewComments = useCallback(async () => {
     if (!activeConversationId) return;
     const next = await fetchPreviewComments(project.id, activeConversationId);
@@ -1464,7 +1516,7 @@ export function ProjectView({
               clearActiveRunRefs(reattachConversationId, controller, cancelController);
               clearStreamingMarker(reattachConversationId);
               persistNow({ telemetryFinalized: true });
-              void refreshProjectFiles();
+              void refreshProjectFiles().then(() => auditDesignSystemWorkspaceAfterRun(message.id));
               onProjectsRefresh();
             },
             onError: (err) => {
@@ -1551,6 +1603,7 @@ export function ProjectView({
     project.id,
     updateMessageById,
     persistMessageById,
+    auditDesignSystemWorkspaceAfterRun,
     markStreamingConversation,
     clearStreamingMarker,
     clearActiveRunRefs,
@@ -1569,6 +1622,7 @@ export function ProjectView({
       if (messagesConversationIdRef.current !== activeConversationId) return;
       if (currentConversationBusy) return;
       if (!prompt.trim() && attachments.length === 0 && commentAttachments.length === 0) return;
+      setChatSeed(null);
       const runConversationId = activeConversationId;
       setError(null);
       const startedAt = Date.now();
@@ -1868,7 +1922,7 @@ export function ProjectView({
           // refresh signal) so we can diff against the pre-turn snapshot
           // and attach the new files to the assistant message as download
           // chips.
-          void refreshProjectFiles().then((nextFiles) => {
+          void refreshProjectFiles().then(async (nextFiles) => {
             const produced = nextFiles.filter((f) => !beforeFileNames.has(f.name));
             setMessages((curr) => {
               const updated = curr.map((m) =>
@@ -1880,6 +1934,7 @@ export function ProjectView({
               if (finalized) persistMessage(finalized, { telemetryFinalized: true });
               return updated;
             });
+            await auditDesignSystemWorkspaceAfterRun(assistantId);
           });
           onProjectsRefresh();
         },
@@ -2067,6 +2122,7 @@ export function ProjectView({
       requestOpenFile,
       persistMessage,
       persistMessageById,
+      auditDesignSystemWorkspaceAfterRun,
       patchAttachedStatuses,
       updateMessageById,
       markStreamingConversation,
@@ -2764,7 +2820,7 @@ export function ProjectView({
     onClearPendingPrompt();
   }, [project.id, project.pendingPrompt, onClearPendingPrompt]);
   const chatInitialDraft =
-    initialDraft?.projectId === project.id ? initialDraft.value : undefined;
+    chatSeed?.value ?? (initialDraft?.projectId === project.id ? initialDraft.value : undefined);
 
   // Continue in CLI / Finalize design package handlers + keyboard
   // shortcut wiring. Close to the JSX so the data flow is easy to
@@ -3072,7 +3128,7 @@ export function ProjectView({
             <ChatPane
               // The conversation id is part of the key so switching conversations
               // resets internal scroll/draft state inside ChatPane and ChatComposer.
-              key={`${project.id}:${activeConversationId ?? 'conversation-unavailable'}`}
+              key={`${project.id}:${activeConversationId ?? 'conversation-unavailable'}:${chatSeed?.id ?? 'ready'}`}
               messages={messages}
               streaming={currentConversationStreaming}
               sendDisabled={currentConversationSendDisabled}

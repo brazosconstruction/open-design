@@ -6,8 +6,10 @@ import type { ConnectorDetail } from '@open-design/contracts';
 
 import {
   buildDesignSystemPackageAuditRepairPrompt,
-  DesignSystemCreationFlow,
   summarizeDesignSystemPackageAudit,
+} from '../../src/runtime/design-system-package-audit';
+import {
+  DesignSystemCreationFlow,
 } from '../../src/components/DesignSystemFlow';
 import type { AppConfig, DesignSystemDetail, Project } from '../../src/types';
 
