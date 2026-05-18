@@ -7,6 +7,121 @@ import { runConnectorsToolCli } from '../src/tools-connectors-cli.js';
 
 const ORIGINAL_ENV = { ...process.env };
 
+const AUDIT_DESIGN_MD = `# Cherry Studio Design System
+
+## Product Context
+
+Cherry Studio is a desktop AI chat workspace with a dense shell, assistant navigation, model selection, and composer-first workflows. The design system should preserve the compact app frame, clear message hierarchy, and source-backed assets.
+
+## Color Foundations
+
+Use the captured primary green, dark theme surfaces, muted dividers, and neutral text colors from source evidence. Color rules must document backgrounds, elevated panels, borders, text, primary actions, and status states.
+
+## Typography
+
+Ubuntu is the core sans family. Use clear size steps for navigation, message content, titles, dense metadata, and button labels. Keep mono text for code-like paths, IDs, and technical details.
+
+## Spacing And Layout
+
+Use compact spacing, slim gutters, and split-pane app layout rules. Preserve sidebar density, toolbar rhythm, composer placement, and scrollable content regions.
+
+## Components
+
+Define buttons, inputs, assistant rows, message bubbles, model selectors, icon actions, settings controls, and status surfaces with concrete states and usage notes.
+
+## Motion And Interaction
+
+Use quick hover/focus feedback, subtle panel transitions, predictable loading states, and reduced-motion fallbacks for desktop productivity.
+
+## Voice And Brand
+
+Use direct product language. Keep labels calm, technical, and concise while preserving Cherry Studio naming and app terminology.
+
+## Anti-patterns
+
+Avoid generic marketing pages, oversized cards, invented palettes, missing source assets, and preview pages that do not show real product modules.
+`;
+
+const AUDIT_README = `# Cherry Studio Design System
+
+This package captures a source-backed Open Design design system for a desktop AI chat workspace. It includes reusable rules, token CSS, focused review previews, preserved assets, preserved fonts, and an applied UI kit.
+
+## Package Contents
+
+- DESIGN.md is the canonical Open Design rules document.
+- colors_and_type.css contains reusable variables for color, type, spacing, radius, and states.
+- preview/ contains focused HTML cards for color, typography, spacing, components, and brand assets.
+- ui_kits/app/ contains an applied interface example for future project reuse.
+- assets/ and fonts/ preserve source-backed brand and typography evidence.
+
+## Review Workflow
+
+Start with DESIGN.md, compare the preview cards, then inspect the applied UI kit. Reuse assets and fonts directly when building product surfaces.
+`;
+
+const AUDIT_SKILL = `# Cherry Studio Design System
+
+Use this skill when creating Open Design artifacts that should match the Cherry Studio desktop AI chat workspace.
+
+## Workflow
+
+1. Read DESIGN.md first and treat it as the source of truth.
+2. Load colors_and_type.css for concrete tokens.
+3. Inspect preview/ for focused review cards before inventing new styling.
+4. Use ui_kits/app/ as the applied interface pattern for chat, assistant navigation, model controls, and composer surfaces.
+5. Preserve source-backed assets and fonts from assets/ and fonts/.
+
+## Output Rules
+
+Keep layouts compact, app-like, and productivity-focused. Use real component states, avoid generic landing pages, and keep typography and spacing grounded in the captured evidence.
+`;
+
+const AUDIT_TOKENS_CSS = `:root {
+  --cherry-bg: #f7f8fa;
+  --cherry-surface: #ffffff;
+  --cherry-surface-muted: #f1f3f5;
+  --cherry-fg: #202124;
+  --cherry-muted: #73777f;
+  --cherry-border: #dfe3e8;
+  --cherry-primary: #00b96b;
+  --cherry-primary-hover: #00a862;
+  --cherry-danger: #ef4444;
+  --cherry-font-sans: Ubuntu, Inter, ui-sans-serif, system-ui, sans-serif;
+  --cherry-font-mono: SFMono-Regular, ui-monospace, monospace;
+  --cherry-radius-sm: 6px;
+  --cherry-radius-md: 10px;
+  --cherry-space-1: 4px;
+  --cherry-space-2: 8px;
+  --cherry-space-3: 12px;
+  --cherry-space-4: 16px;
+}
+`;
+
+function auditHtml(title: string): string {
+  const cards = Array.from({ length: 8 }, (_, index) => `<article><h2>${title} ${index + 1}</h2><p>Source-backed review content for compact desktop app surfaces, component states, spacing, typography, and reusable product modules.</p><button>Review state</button></article>`).join('');
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${title}</title>
+  <style>
+    body { margin: 0; font-family: Ubuntu, Inter, sans-serif; background: #f7f8fa; color: #202124; }
+    main { width: min(960px, calc(100vw - 48px)); margin: 40px auto; display: grid; gap: 16px; }
+    article { border: 1px solid #dfe3e8; border-radius: 10px; background: #fff; padding: 16px; }
+    button { border: 1px solid #00b96b; background: #00b96b; color: #fff; border-radius: 8px; padding: 8px 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${title}</h1>
+    <p>A focused review card that preserves product density, component rhythm, and real source-backed design evidence.</p>
+    ${cards}
+  </main>
+</body>
+</html>
+`;
+}
+
 describe('connectors tool CLI', () => {
   let stdoutWrite: { mockRestore: () => void };
   let stderrWrite: { mockRestore: () => void };
@@ -234,10 +349,10 @@ describe('connectors tool CLI', () => {
     await mkdir(path.join(tmpDir, 'assets'), { recursive: true });
     await mkdir(path.join(tmpDir, 'fonts/ubuntu'), { recursive: true });
     await mkdir(path.join(tmpDir, 'context/local-code/cherry/files/src'), { recursive: true });
-    await writeFile(path.join(tmpDir, 'DESIGN.md'), '# Cherry Studio Design System\n');
-    await writeFile(path.join(tmpDir, 'README.md'), '# Cherry Studio Design System\n');
-    await writeFile(path.join(tmpDir, 'SKILL.md'), '# Cherry Studio Design System\n');
-    await writeFile(path.join(tmpDir, 'colors_and_type.css'), ':root { --color-primary: #00b96b; }\n');
+    await writeFile(path.join(tmpDir, 'DESIGN.md'), AUDIT_DESIGN_MD);
+    await writeFile(path.join(tmpDir, 'README.md'), AUDIT_README);
+    await writeFile(path.join(tmpDir, 'SKILL.md'), AUDIT_SKILL);
+    await writeFile(path.join(tmpDir, 'colors_and_type.css'), AUDIT_TOKENS_CSS);
     for (const fileName of [
       'colors-primary.html',
       'colors-theme-light.html',
@@ -246,9 +361,9 @@ describe('connectors tool CLI', () => {
       'components-buttons.html',
       'brand-assets.html',
     ]) {
-      await writeFile(path.join(tmpDir, 'preview', fileName), '<!doctype html><title>Preview</title>');
+      await writeFile(path.join(tmpDir, 'preview', fileName), auditHtml(fileName));
     }
-    await writeFile(path.join(tmpDir, 'ui_kits/app/index.html'), '<!doctype html><title>UI kit</title>');
+    await writeFile(path.join(tmpDir, 'ui_kits/app/index.html'), auditHtml('Cherry Studio UI kit'));
     await writeFile(path.join(tmpDir, 'ui_kits/app/README.md'), '# UI kit\n');
     await writeFile(path.join(tmpDir, 'assets/logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     await writeFile(path.join(tmpDir, 'fonts/ubuntu/Ubuntu-Regular.ttf'), Buffer.from('font-data'));
@@ -332,9 +447,9 @@ describe('connectors tool CLI', () => {
     await mkdir(path.join(tmpDir, 'ui_kits/app'), { recursive: true });
     await mkdir(path.join(tmpDir, 'assets'), { recursive: true });
     await mkdir(path.join(tmpDir, 'fonts/ubuntu'), { recursive: true });
-    await writeFile(path.join(tmpDir, 'README.md'), '# Cherry Studio Design System\n');
-    await writeFile(path.join(tmpDir, 'SKILL.md'), '# Cherry Studio Design System\n');
-    await writeFile(path.join(tmpDir, 'colors_and_type.css'), ':root { --color-primary: #00b96b; }\n');
+    await writeFile(path.join(tmpDir, 'README.md'), AUDIT_README);
+    await writeFile(path.join(tmpDir, 'SKILL.md'), AUDIT_SKILL);
+    await writeFile(path.join(tmpDir, 'colors_and_type.css'), AUDIT_TOKENS_CSS);
     for (const fileName of [
       'colors-primary.html',
       'colors-theme-light.html',
@@ -346,9 +461,9 @@ describe('connectors tool CLI', () => {
       'components-inputs.html',
       'brand-assets.html',
     ]) {
-      await writeFile(path.join(tmpDir, 'preview', fileName), '<!doctype html><title>Preview</title>');
+      await writeFile(path.join(tmpDir, 'preview', fileName), auditHtml(fileName));
     }
-    await writeFile(path.join(tmpDir, 'ui_kits/app/index.html'), '<!doctype html><title>UI kit</title>');
+    await writeFile(path.join(tmpDir, 'ui_kits/app/index.html'), auditHtml('Cherry Studio UI kit'));
     await writeFile(path.join(tmpDir, 'ui_kits/app/README.md'), '# UI kit\n');
     await writeFile(path.join(tmpDir, 'assets/logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     await writeFile(path.join(tmpDir, 'fonts/ubuntu/Ubuntu-Regular.ttf'), Buffer.from('font-data'));

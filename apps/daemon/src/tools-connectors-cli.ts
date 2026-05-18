@@ -1465,6 +1465,23 @@ async function auditDesignSystemPackage(
   const requireFile = (filePath: string, message: string) => {
     if (!fileSet.has(filePath)) addIssue('error', 'missing_required_file', message, filePath);
   };
+  const requireContent = async (
+    filePath: string,
+    minBytes: number,
+    code: string,
+    message: string,
+    validate?: (text: string) => string | undefined,
+  ) => {
+    if (!fileSet.has(filePath)) return;
+    const text = await readAuditText(projectPath, filePath);
+    if (text === undefined) return;
+    if (Buffer.byteLength(text, 'utf8') < minBytes) {
+      addIssue('error', code, message, filePath);
+      return;
+    }
+    const validationMessage = validate?.(text);
+    if (validationMessage) addIssue('error', code, validationMessage, filePath);
+  };
 
   if (options.referencePackage === true) {
     if (!fileSet.has('DESIGN.md')) {
@@ -1476,6 +1493,10 @@ async function auditDesignSystemPackage(
   requireFile('README.md', 'Claude Design-style packages need README.md so the system is reusable outside the current run.');
   requireFile('SKILL.md', 'Claude Design-style packages need SKILL.md with agent-facing usage instructions.');
   requireFile('colors_and_type.css', 'Claude Design-style packages need colors_and_type.css for reusable color, type, spacing, radius, and state tokens.');
+  await requireContent('DESIGN.md', 800, 'thin_design_rules', 'DESIGN.md is too thin to be a reusable rules document; include source-backed context, foundations, tokens, components, motion, voice, and anti-patterns.', validateDesignRules);
+  await requireContent('README.md', 600, 'thin_readme', 'README.md is too thin to explain the package, source evidence, generated files, and reuse workflow.', requireMarkdownHeading);
+  await requireContent('SKILL.md', 500, 'thin_skill', 'SKILL.md is too thin to guide future agents on how to use this design system.', requireMarkdownHeading);
+  await requireContent('colors_and_type.css', 500, 'thin_token_css', 'colors_and_type.css is too thin to carry reusable color, typography, spacing, radius, and state tokens.', validateTokenCss);
 
   const previewFiles = files.filter((filePath) => /^preview\/.+\.html$/u.test(filePath));
   if (previewFiles.length < 6) {
@@ -1495,9 +1516,13 @@ async function auditDesignSystemPackage(
   }
 
   requireFile('ui_kits/app/index.html', 'Claude Design-style packages need an applied interface kit at ui_kits/app/index.html.');
+  await requireContent('ui_kits/app/index.html', 900, 'thin_ui_kit', 'ui_kits/app/index.html is too thin; include an applied interface example with real layout, components, and states.', validateHtmlDocument);
   if (!fileSet.has('ui_kits/app/README.md')) {
     addIssue('warning', 'missing_ui_kit_readme', 'Add ui_kits/app/README.md so future projects know how to reuse the applied UI kit.', 'ui_kits/app/README.md');
   }
+  await Promise.all(previewFiles.map((filePath) =>
+    requireContent(filePath, 900, 'thin_preview_card', `${filePath} is too thin to be a reviewable focused preview card.`, validateHtmlDocument),
+  ));
 
   const sourceManifest = await readAuditText(projectPath, 'context/source-context.md');
   const evidenceNotes = files.filter((filePath) => /^context\/(github|local-code)\/[^/]+\.md$/u.test(filePath));
@@ -1566,6 +1591,48 @@ async function readAuditText(projectPath: string, relativePath: string): Promise
   } catch {
     return undefined;
   }
+}
+
+function requireMarkdownHeading(text: string): string | undefined {
+  return /^#\s+\S+/mu.test(text) ? undefined : 'Expected a top-level markdown heading.';
+}
+
+function validateDesignRules(text: string): string | undefined {
+  const headings = new Set([...text.matchAll(/^##\s+(.+?)\s*$/gmu)].map((match) => (match[1] ?? '').toLowerCase()));
+  const requiredGroups = [
+    ['context', 'product'],
+    ['color', 'palette'],
+    ['typography', 'type'],
+    ['spacing', 'layout'],
+    ['component'],
+    ['motion', 'interaction'],
+    ['voice', 'brand'],
+    ['anti-pattern'],
+  ];
+  const missing = requiredGroups.filter((group) =>
+    ![...headings].some((heading) => group.some((needle) => heading.includes(needle))),
+  );
+  return missing.length === 0
+    ? undefined
+    : `DESIGN.md is missing source-backed sections for ${missing.map((group) => group[0]).join(', ')}.`;
+}
+
+function validateTokenCss(text: string): string | undefined {
+  const variables = [...text.matchAll(/--[a-z0-9_-]+\s*:/giu)].length;
+  if (variables < 12) return `Expected at least 12 CSS custom properties, found ${variables}.`;
+  const colors = [...text.matchAll(/#[0-9a-f]{3,8}\b|rgb[a]?\(|hsl[a]?\(/giu)].length;
+  if (colors < 4) return `Expected concrete color values in colors_and_type.css, found ${colors}.`;
+  if (!/font(-family)?|--[^:]*font/iu.test(text)) return 'Expected font-family or font token declarations.';
+  if (!/radius|border-radius/iu.test(text)) return 'Expected radius token declarations.';
+  if (!/space|spacing|gap/iu.test(text)) return 'Expected spacing token declarations.';
+  return undefined;
+}
+
+function validateHtmlDocument(text: string): string | undefined {
+  if (!/<!doctype html>|<html[\s>]/iu.test(text)) return 'Expected a complete HTML document.';
+  if (!/<style[\s>]/iu.test(text)) return 'Expected embedded CSS styles for review fidelity.';
+  if (!/<(main|section|article|aside|header|div)\b/iu.test(text)) return 'Expected real layout markup, not only metadata.';
+  return undefined;
 }
 
 function manifestHasLinkedGithub(manifest: string): boolean {
