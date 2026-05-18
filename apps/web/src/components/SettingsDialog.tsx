@@ -4361,8 +4361,8 @@ function MediaProvidersSection({
                   as warnings; one chip reads as status.
                 */}
               </div>
+              {provider.id === 'grok' ? <XaiOAuthControl /> : null}
               <div className="media-provider-body">
-                {provider.id === 'grok' ? <XaiOAuthControl /> : null}
                 <div className="media-provider-secret-field">
                   <input
                     type={apiKeyVisible ? 'text' : 'password'}

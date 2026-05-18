@@ -85,6 +85,34 @@ async function disconnectOAuth(): Promise<boolean> {
   }
 }
 
+async function completeOAuthManual(
+  state: string,
+  code: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    const r = await fetch('/api/xai/oauth/complete', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ state, code }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const message =
+        typeof body?.error === 'string' && body.error
+          ? body.error
+          : `daemon returned HTTP ${r.status}`;
+      return { ok: false, message };
+    }
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export function XaiOAuthControl() {
   const [status, setStatus] = useState<XaiAuthStatus | null>(null);
   const [busy, setBusy] = useState<Busy>('idle');
@@ -92,6 +120,10 @@ export function XaiOAuthControl() {
   // Authorize URL kept around as a fallback link in case the popup blocker
   // ate window.open or the user closed the tab and wants to re-open it.
   const [pendingAuthUrl, setPendingAuthUrl] = useState<string | null>(null);
+  // State emitted by /oauth/start. Needed to complete a paste-back when
+  // xAI shows a manual code instead of redirecting to the loopback.
+  const [pendingState, setPendingState] = useState<string | null>(null);
+  const [pasteCode, setPasteCode] = useState('');
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = async () => {
@@ -123,13 +155,17 @@ export function XaiOAuthControl() {
           setBusy('idle');
           setError(null);
           setPendingAuthUrl(null);
+          setPendingState(null);
+          setPasteCode('');
           stopPoll();
-        } else if (data && !data.listening) {
-          // Listener self-closed (timeout / error) — give up polling so
-          // the UI doesn't sit forever on "Waiting…".
-          stopPoll();
-          setBusy('idle');
         }
+        // Intentionally NOT auto-clearing the awaiting state when
+        // `data.listening` flips false. xAI commonly shows a paste-back
+        // page instead of redirecting, in which case the loopback
+        // listener never receives a callback and self-closes after its
+        // 30 min timeout — but the user still has a valid code in their
+        // clipboard. Keeping pendingState live lets them paste it; the
+        // `Cancel` button is the manual way out.
       })();
       // Hard cap at 30 min — same as the daemon-side listener timeout.
       if (elapsed >= 30 * 60 * 1000) stopPoll();
@@ -139,6 +175,8 @@ export function XaiOAuthControl() {
   const onConnect = async () => {
     setError(null);
     setPendingAuthUrl(null);
+    setPendingState(null);
+    setPasteCode('');
     setBusy('starting');
     const result = await startOAuth();
     if (!result.ok) {
@@ -148,6 +186,7 @@ export function XaiOAuthControl() {
     }
     setBusy('awaiting');
     setPendingAuthUrl(result.response.authorizeUrl);
+    setPendingState(result.response.state);
     startPoll();
     try {
       window.open(
@@ -158,6 +197,25 @@ export function XaiOAuthControl() {
     } catch {
       // Fallback anchor is always rendered while pending.
     }
+  };
+
+  const onPasteSubmit = async () => {
+    const trimmed = pasteCode.trim();
+    if (!pendingState || !trimmed) return;
+    setBusy('refreshing');
+    setError(null);
+    const result = await completeOAuthManual(pendingState, trimmed);
+    if (!result.ok) {
+      setBusy('awaiting');
+      setError(result.message);
+      return;
+    }
+    setBusy('idle');
+    setPendingAuthUrl(null);
+    setPendingState(null);
+    setPasteCode('');
+    stopPoll();
+    await refresh();
   };
 
   const onRefreshStatus = async () => {
@@ -175,6 +233,8 @@ export function XaiOAuthControl() {
 
   const onCancelPending = () => {
     setPendingAuthUrl(null);
+    setPendingState(null);
+    setPasteCode('');
     setBusy('idle');
     setError(null);
     stopPoll();
@@ -198,7 +258,15 @@ export function XaiOAuthControl() {
     status?.expiresAt && status.expiresAt > 0
       ? new Date(status.expiresAt).toLocaleString()
       : null;
-  const isAwaiting = busy === 'awaiting' || (Boolean(pendingAuthUrl) && !connected);
+  // "Awaiting" once we've started the dance: the authorize URL is open OR
+  // a state is pending OR the daemon is processing a paste-back. Stays
+  // true even when the loopback listener self-closes, so the paste-back
+  // input stays interactive until the user cancels or the token lands.
+  const isAwaiting =
+    busy === 'awaiting'
+    || busy === 'refreshing'
+    || (Boolean(pendingState) && !connected)
+    || (Boolean(pendingAuthUrl) && !connected);
 
   return (
     <div className={`mcp-oauth-control${connected ? ' connected' : ''}`}>
@@ -210,10 +278,14 @@ export function XaiOAuthControl() {
               <strong>Signed in with X.</strong>{' '}
               {expiresLabel ? (
                 <span className="hint">
-                  SuperGrok subscription token expires {expiresLabel}.
+                  SuperGrok subscription token expires {expiresLabel}. You can
+                  close any open xAI browser tabs now.
                 </span>
               ) : (
-                <span className="hint">SuperGrok subscription connected.</span>
+                <span className="hint">
+                  SuperGrok subscription connected. You can close any open xAI
+                  browser tabs now.
+                </span>
               )}
             </span>
           </>
@@ -223,10 +295,9 @@ export function XaiOAuthControl() {
             <span>
               <strong>Waiting for authorization…</strong>{' '}
               <span className="hint">
-                Approve in the browser tab that opened. The daemon is
-                listening on 127.0.0.1:56121 — if you're on a remote machine,
-                forward the port with{' '}
-                <code>ssh -L 56121:127.0.0.1:56121 user@host</code>.
+                Open Design is listening for the callback in the background.
+                This panel will switch to <em>Signed in</em> within a few
+                seconds of your approving on xAI.
               </span>
             </span>
           </>
@@ -244,6 +315,18 @@ export function XaiOAuthControl() {
           </>
         )}
       </div>
+
+      {isAwaiting ? (
+        <div className="xai-oauth-warning" role="status">
+          <strong>Heads up:</strong> xAI may show a page that says{' '}
+          <em>"Cannot connect to your application"</em> (or 「无法建立连接」
+          in Chinese). <strong>That is a UX bug on xAI's side</strong> — the
+          authorization is still being delivered to Open Design in the
+          background. Stay on this panel; it will switch to{' '}
+          <em>Signed in with X</em> automatically. Do not retry from xAI's
+          page.
+        </div>
+      ) : null}
 
       <div className="mcp-oauth-actions">
         {connected ? (
@@ -298,6 +381,36 @@ export function XaiOAuthControl() {
             Click here to open the authorize URL manually
           </a>
           .
+        </div>
+      ) : null}
+
+      {isAwaiting && pendingState ? (
+        <div className="xai-oauth-paste">
+          <p className="hint">
+            xAI may show a code instead of redirecting back. Paste it here:
+          </p>
+          <div className="xai-oauth-paste-row">
+            <input
+              type="text"
+              value={pasteCode}
+              placeholder="Paste auth code from xAI"
+              onChange={(e) => setPasteCode(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && pasteCode.trim()) {
+                  void onPasteSubmit();
+                }
+              }}
+              disabled={busy === 'refreshing'}
+              aria-label="Paste auth code from xAI"
+            />
+            <button
+              type="button"
+              onClick={onPasteSubmit}
+              disabled={!pasteCode.trim() || busy === 'refreshing'}
+            >
+              {busy === 'refreshing' ? 'Submitting…' : 'Submit code'}
+            </button>
+          </div>
         </div>
       ) : null}
 

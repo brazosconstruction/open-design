@@ -32,7 +32,11 @@ vi.mock('../src/xai-oauth-server.js', () => ({
   startCallbackListener: startMock,
 }));
 
-import { registerXaiRoutes } from '../src/xai-routes.js';
+import {
+  extractAnswerText,
+  extractUrlCitations,
+  registerXaiRoutes,
+} from '../src/xai-routes.js';
 import {
   XAI_OAUTH_AUTHORIZATION_ENDPOINT,
   XAI_OAUTH_TOKEN_ENDPOINT,
@@ -198,6 +202,78 @@ describe('xai-routes', () => {
     expect(typeof status.expiresAt).toBe('number');
   });
 
+  it('POST /api/xai/oauth/complete (paste-back) exchanges code and stores token', async () => {
+    const startResp = await fetch(`${app.baseUrl}/api/xai/oauth/start`, {
+      method: 'POST',
+    });
+    const { state } = await startResp.json();
+
+    globalThis.fetch = vi.fn(async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === XAI_OAUTH_TOKEN_ENDPOINT) {
+        return new Response(
+          JSON.stringify({
+            access_token: 'pasted-bearer',
+            refresh_token: 'rt-paste',
+            token_type: 'Bearer',
+            expires_in: 7200,
+            scope: 'openid profile',
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+
+    const completeResp = await fetch(
+      `${app.baseUrl}/api/xai/oauth/complete`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ state, code: 'pasted-code-123' }),
+      },
+    );
+    expect(completeResp.status).toBe(200);
+    expect((await completeResp.json()).ok).toBe(true);
+
+    const status = await fetch(`${app.baseUrl}/api/xai/auth/status`).then(
+      (r) => r.json(),
+    );
+    expect(status.connected).toBe(true);
+    expect(status.scope).toBe('openid profile');
+    expect(status.listening).toBe(false);
+    // Paste-back must stop the loopback listener so it doesn't dangle.
+    expect(stopMock).toHaveBeenCalled();
+  });
+
+  it('POST /api/xai/oauth/complete rejects empty state or code', async () => {
+    await fetch(`${app.baseUrl}/api/xai/oauth/start`, { method: 'POST' });
+    const r1 = await fetch(`${app.baseUrl}/api/xai/oauth/complete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ state: '', code: 'c' }),
+    });
+    expect(r1.status).toBe(400);
+
+    const r2 = await fetch(`${app.baseUrl}/api/xai/oauth/complete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ state: 's', code: '   ' }),
+    });
+    expect(r2.status).toBe(400);
+  });
+
+  it('POST /api/xai/oauth/complete surfaces an unknown state as 400', async () => {
+    const r = await fetch(`${app.baseUrl}/api/xai/oauth/complete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ state: 'never-issued', code: 'c' }),
+    });
+    expect(r.status).toBe(400);
+    const body = await r.json();
+    expect(body.error).toMatch(/state not found/i);
+  });
+
   it('callback error path does not store a token', async () => {
     await fetch(`${app.baseUrl}/api/xai/oauth/start`, { method: 'POST' });
     expect(onCallbackHolder.current).toBeTruthy();
@@ -209,6 +285,152 @@ describe('xai-routes', () => {
       (r) => r.json(),
     );
     expect(status.connected).toBe(false);
+  });
+
+  it('POST /api/xai/search rejects missing/blank query with 400', async () => {
+    const r1 = await fetch(`${app.baseUrl}/api/xai/search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(r1.status).toBe(400);
+
+    const r2 = await fetch(`${app.baseUrl}/api/xai/search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: '   ' }),
+    });
+    expect(r2.status).toBe(400);
+  });
+
+  it('POST /api/xai/search returns 401 when no credentials are available', async () => {
+    const r = await fetch(`${app.baseUrl}/api/xai/search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'who launched grok 4.3' }),
+    });
+    expect(r.status).toBe(401);
+    const body = await r.json();
+    expect(body.error).toMatch(/no xAI credentials/i);
+  });
+
+  it('POST /api/xai/search forwards bearer + x_search options to xAI Responses API and parses the response', async () => {
+    // Pre-stage a stored xAI key the way Settings → Grok would.
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const { default: pathMod } = await import('node:path');
+    const cfgPath = pathMod.join(projectRoot, '.od', 'media-config.json');
+    await mkdir(pathMod.dirname(cfgPath), { recursive: true });
+    await writeFile(
+      cfgPath,
+      JSON.stringify({
+        providers: {
+          grok: { apiKey: 'stored-test-bearer', baseUrl: 'https://xai.example.test/v1' },
+        },
+      }),
+      'utf8',
+    );
+
+    let xaiHit = 0;
+    globalThis.fetch = vi.fn(async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('xai.example.test')) {
+        xaiHit += 1;
+        expect(url).toBe('https://xai.example.test/v1/responses');
+        const headers = init?.headers as Record<string, string>;
+        expect(headers.authorization).toBe('Bearer stored-test-bearer');
+        expect(headers['content-type']).toBe('application/json');
+        const reqBody = JSON.parse(String(init?.body));
+        expect(reqBody.model).toBe('grok-4.20-reasoning');
+        expect(reqBody.input).toEqual([
+          { role: 'user', content: 'latest hermes-agent release notes' },
+        ]);
+        expect(reqBody.tools[0]).toEqual({
+          type: 'x_search',
+          allowed_x_handles: ['NousResearch', 'xai'],
+          from_date: '2026-05-01',
+        });
+        return new Response(
+          JSON.stringify({
+            output: [
+              {
+                content: [
+                  {
+                    text: 'Hermes 0.11 shipped xAI integration on 5/15.',
+                    annotations: [
+                      {
+                        type: 'url_citation',
+                        url: 'https://x.com/NousResearch/status/123',
+                        start_index: 0,
+                        end_index: 7,
+                      },
+                      {
+                        type: 'url_citation',
+                        url: 'https://x.com/xai/status/456',
+                        start_index: 8,
+                        end_index: 15,
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      // Pass through anything that isn't an xAI call (the test's own
+      // request to the local express server).
+      return realFetch(input, init);
+    }) as typeof fetch;
+
+    const r = await fetch(`${app.baseUrl}/api/xai/search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        query: 'latest hermes-agent release notes',
+        allowed_x_handles: ['NousResearch', 'xai'],
+        from_date: '2026-05-01',
+      }),
+    });
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.answer).toContain('xAI integration');
+    expect(body.citations).toEqual([
+      'https://x.com/NousResearch/status/123',
+      'https://x.com/xai/status/456',
+    ]);
+    expect(body.model).toBe('grok-4.20-reasoning');
+    expect(xaiHit).toBe(1);
+  });
+
+  it('POST /api/xai/search surfaces upstream errors as 502', async () => {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const { default: pathMod } = await import('node:path');
+    const cfgPath = pathMod.join(projectRoot, '.od', 'media-config.json');
+    await mkdir(pathMod.dirname(cfgPath), { recursive: true });
+    await writeFile(
+      cfgPath,
+      JSON.stringify({ providers: { grok: { apiKey: 'k' } } }),
+      'utf8',
+    );
+    globalThis.fetch = vi.fn(async (input: any, init?: any) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('api.x.ai')) {
+        return new Response('{"error":{"message":"rate limited"}}', {
+          status: 429,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+
+    const r = await fetch(`${app.baseUrl}/api/xai/search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'q' }),
+    });
+    expect(r.status).toBe(502);
+    expect((await r.json()).error).toMatch(/xAI 429/);
   });
 
   it('POST /api/xai/oauth/disconnect wipes a stored token', async () => {
@@ -248,6 +470,61 @@ describe('xai-routes', () => {
       r.json(),
     );
     expect(status.connected).toBe(false);
+  });
+});
+
+describe('xAI Responses API parsers', () => {
+  it('extractAnswerText prefers output_text when present', () => {
+    expect(
+      extractAnswerText({ output_text: 'inline answer', output: [] }),
+    ).toBe('inline answer');
+  });
+
+  it('extractAnswerText falls back to walking output[].content[].text', () => {
+    expect(
+      extractAnswerText({
+        output: [
+          { content: [{ text: 'first line' }, { text: 'second line' }] },
+          { content: [{ text: 'third line' }] },
+        ],
+      }),
+    ).toBe('first line\nsecond line\nthird line');
+  });
+
+  it('extractAnswerText returns empty string for malformed payloads', () => {
+    expect(extractAnswerText(null)).toBe('');
+    expect(extractAnswerText('not an object')).toBe('');
+    expect(extractAnswerText({ output: 'not an array' })).toBe('');
+  });
+
+  it('extractUrlCitations dedupes url_citation annotations', () => {
+    expect(
+      extractUrlCitations({
+        output: [
+          {
+            content: [
+              {
+                annotations: [
+                  { type: 'url_citation', url: 'https://x.com/a' },
+                  { type: 'url_citation', url: 'https://x.com/b' },
+                  { type: 'url_citation', url: 'https://x.com/a' }, // dup
+                ],
+              },
+              {
+                annotations: [
+                  { type: 'something_else', url: 'https://x.com/c' },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual(['https://x.com/a', 'https://x.com/b']);
+  });
+
+  it('extractUrlCitations returns [] for missing annotations', () => {
+    expect(extractUrlCitations({ output: [] })).toEqual([]);
+    expect(extractUrlCitations(null)).toEqual([]);
   });
 });
 
@@ -301,11 +578,13 @@ describe('xai-routes — cross-origin guard', () => {
     await rm(projectRoot, { recursive: true, force: true });
   });
 
-  it('rejects all three endpoints when isLocalSameOrigin is false', async () => {
+  it('rejects all five endpoints when isLocalSameOrigin is false', async () => {
     for (const [method, path] of [
       ['POST', '/api/xai/oauth/start'],
+      ['POST', '/api/xai/oauth/complete'],
       ['GET', '/api/xai/auth/status'],
       ['POST', '/api/xai/oauth/disconnect'],
+      ['POST', '/api/xai/search'],
     ]) {
       const r = await fetch(`${app.baseUrl}${path}`, { method });
       expect(r.status).toBe(403);
