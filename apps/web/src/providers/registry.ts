@@ -30,6 +30,7 @@ import type {
   DesignSystemFileDetail,
   DesignSystemFileSummary,
   DesignSystemGenerationJob,
+  DesignSystemPackageAudit,
   DesignSystemProvenance,
   DesignSystemRevision,
   DesignSystemRevisionJobRequest,
@@ -460,6 +461,22 @@ export async function fetchDesignSystemGenerationJob(
     if (!resp.ok) return null;
     const json = (await resp.json()) as { job?: DesignSystemGenerationJob };
     return json.job ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchProjectDesignSystemPackageAudit(
+  projectId: string,
+): Promise<DesignSystemPackageAudit | null> {
+  try {
+    const resp = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/design-system-package-audit`,
+      { cache: 'no-store' },
+    );
+    if (!resp.ok) return null;
+    const json = (await resp.json()) as { audit?: DesignSystemPackageAudit };
+    return json.audit ?? null;
   } catch {
     return null;
   }

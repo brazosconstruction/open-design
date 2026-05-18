@@ -158,6 +158,41 @@ describe('project design system route gates', () => {
     expect(reopenedBody.project.pendingPrompt).toBe(prompt);
   });
 
+  it('audits generated design-system package files from the project workspace', async () => {
+    const projectId = uniqueId('project-ds-audit');
+    const createResp = await createProject({
+      id: projectId,
+      name: 'Package Audit Project',
+      skillId: null,
+      designSystemId: null,
+    });
+    expect(createResp.status).toBe(200);
+    projectsToClean.push(projectId);
+
+    await writeProjectText(projectId, 'DESIGN.md', '# Package Audit Project\n\nOnly the rules file exists so far.\n');
+
+    const auditResp = await fetch(
+      `${baseUrl}/api/projects/${encodeURIComponent(projectId)}/design-system-package-audit`,
+    );
+    expect(auditResp.status).toBe(200);
+    const body = (await auditResp.json()) as {
+      audit: {
+        ok: boolean;
+        filesInspected: number;
+        errors: Array<{ code: string; path?: string }>;
+      };
+    };
+
+    expect(body.audit.ok).toBe(false);
+    expect(body.audit.filesInspected).toBeGreaterThan(0);
+    expect(body.audit.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'missing_required_file', path: 'README.md' }),
+        expect.objectContaining({ code: 'missing_required_file', path: 'SKILL.md' }),
+      ]),
+    );
+  });
+
   it('removes legacy design-system artifact names when re-opening a migrated workspace', async () => {
     const draft = await createUserDesignSystem('draft');
 

@@ -13,6 +13,7 @@ import {
 } from './plugins/index.js';
 import type { RouteDeps } from './server-context.js';
 import { listSkills } from './skills.js';
+import { auditDesignSystemPackage } from './tools-connectors-cli.js';
 
 export interface RegisterProjectRoutesDeps extends RouteDeps<'db' | 'design' | 'http' | 'paths' | 'projectStore' | 'projectFiles' | 'conversations' | 'templates' | 'status' | 'events' | 'ids' | 'telemetry' | 'validation'> {}
 
@@ -803,7 +804,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
   const { upload } = ctx.uploads;
   const { fs } = ctx.node;
   const { getProject } = ctx.projectStore;
-  const { listFiles, searchProjectFiles, readProjectFile, resolveProjectFilePath, parseByteRange, renameProjectFile, deleteProjectFile, writeProjectFile, sanitizeName, ensureProject } = ctx.projectFiles;
+  const { listFiles, searchProjectFiles, readProjectFile, resolveProjectDir, resolveProjectFilePath, parseByteRange, renameProjectFile, deleteProjectFile, writeProjectFile, sanitizeName, ensureProject } = ctx.projectFiles;
   const { buildDocumentPreview } = ctx.documents;
   const { validateArtifactManifestInput } = ctx.artifacts;
 
@@ -843,6 +844,22 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
         metadata: searchProject?.metadata,
       });
       res.json({ query, matches });
+    } catch (err: any) {
+      sendApiError(res, 400, 'BAD_REQUEST', String(err));
+    }
+  });
+
+  app.get('/api/projects/:id/design-system-package-audit', async (req, res) => {
+    try {
+      const project = getProject(db, req.params.id);
+      if (!project) {
+        sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'project not found');
+        return;
+      }
+      const projectRoot = resolveProjectDir(PROJECTS_DIR, project.id, project.metadata);
+      const audit = await auditDesignSystemPackage(projectRoot);
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ audit });
     } catch (err: any) {
       sendApiError(res, 400, 'BAD_REQUEST', String(err));
     }

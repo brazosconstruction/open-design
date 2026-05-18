@@ -277,6 +277,27 @@ export interface DesignSystemGenerationJobResponse {
   job: DesignSystemGenerationJob;
 }
 
+export type DesignSystemPackageAuditSeverity = 'error' | 'warning';
+
+export interface DesignSystemPackageAuditIssue {
+  severity: DesignSystemPackageAuditSeverity;
+  code: string;
+  message: string;
+  path?: string;
+}
+
+export interface DesignSystemPackageAudit {
+  ok: boolean;
+  projectPath: string;
+  filesInspected: number;
+  errors: DesignSystemPackageAuditIssue[];
+  warnings: DesignSystemPackageAuditIssue[];
+}
+
+export interface DesignSystemPackageAuditResponse {
+  audit: DesignSystemPackageAudit;
+}
+
 export interface DesignSystemRevisionJobRequest {
   feedback: string;
   sectionTitle?: string;

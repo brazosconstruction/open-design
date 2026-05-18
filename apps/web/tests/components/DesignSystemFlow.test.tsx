@@ -4,7 +4,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorDetail } from '@open-design/contracts';
 
-import { DesignSystemCreationFlow } from '../../src/components/DesignSystemFlow';
+import {
+  buildDesignSystemPackageAuditRepairPrompt,
+  DesignSystemCreationFlow,
+  summarizeDesignSystemPackageAudit,
+} from '../../src/components/DesignSystemFlow';
 import type { AppConfig, DesignSystemDetail, Project } from '../../src/types';
 
 const mocks = vi.hoisted(() => ({
@@ -71,6 +75,46 @@ beforeEach(() => {
     kind: 'document',
     mime: 'text/markdown',
   }));
+});
+
+describe('design system package audit helpers', () => {
+  it('summarizes passing audits and builds repair prompts for findings', () => {
+    expect(summarizeDesignSystemPackageAudit({
+      ok: true,
+      projectPath: '/tmp/ds',
+      filesInspected: 12,
+      errors: [],
+      warnings: [],
+    })).toBe('Package audit passed (12 files inspected).');
+
+    const failingAudit = {
+      ok: false,
+      projectPath: '/tmp/ds',
+      filesInspected: 8,
+      errors: [{
+        severity: 'error' as const,
+        code: 'ui_kit_index_missing_runtime_bootstrap',
+        message: 'ui_kits/app/index.html must mount the kit.',
+        path: 'ui_kits/app/index.html',
+      }],
+      warnings: [{
+        severity: 'warning' as const,
+        code: 'missing_source_component_examples',
+        message: 'Copy source examples into source_examples/.',
+        path: 'source_examples/',
+      }],
+    };
+
+    expect(summarizeDesignSystemPackageAudit(failingAudit)).toContain(
+      'Package audit found 1 error and 1 warning',
+    );
+    expect(buildDesignSystemPackageAuditRepairPrompt(failingAudit)).toContain(
+      'tools connectors design-system-package-audit --path . --fail-on-warnings',
+    );
+    expect(buildDesignSystemPackageAuditRepairPrompt(failingAudit)).toContain(
+      '[warning] missing_source_component_examples source_examples/',
+    );
+  });
 });
 
 describe('DesignSystemCreationFlow', () => {

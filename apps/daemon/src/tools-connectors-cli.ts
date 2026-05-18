@@ -125,16 +125,16 @@ interface LocalDesignEvidence {
   warnings: string[];
 }
 
-type DesignSystemAuditSeverity = 'error' | 'warning';
+export type DesignSystemAuditSeverity = 'error' | 'warning';
 
-interface DesignSystemAuditIssue {
+export interface DesignSystemAuditIssue {
   severity: DesignSystemAuditSeverity;
   code: string;
   message: string;
   path?: string;
 }
 
-interface DesignSystemPackageAudit {
+export interface DesignSystemPackageAudit {
   ok: boolean;
   projectPath: string;
   filesInspected: number;
@@ -1462,7 +1462,7 @@ async function runDesignSystemPackageAudit(options: ParsedOptions): Promise<Tool
   return { exitCode: ok ? 0 : 1 };
 }
 
-async function auditDesignSystemPackage(
+export async function auditDesignSystemPackage(
   projectPath: string,
   options: { referencePackage?: boolean } = {},
 ): Promise<DesignSystemPackageAudit> {
