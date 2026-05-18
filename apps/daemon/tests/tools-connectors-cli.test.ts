@@ -46,6 +46,10 @@ const AUDIT_README = `# Cherry Studio Design System
 
 This package captures a source-backed Open Design design system for a desktop AI chat workspace. It includes reusable rules, token CSS, focused review previews, preserved assets, preserved fonts, and an applied UI kit.
 
+## Product Overview
+
+Cherry Studio is a desktop AI chat workspace for multi-model assistant workflows. The source product provides assistant navigation, topic and message review, model selection, file-aware composer controls, settings panels, and compact cross-platform app chrome for Windows, macOS, and Linux. Use this package to preserve that dense productivity surface rather than turning the system into a generic landing page.
+
 ## Package Contents
 
 - DESIGN.md is the canonical Open Design rules document.
@@ -57,6 +61,34 @@ This package captures a source-backed Open Design design system for a desktop AI
 ## Review Workflow
 
 Start with DESIGN.md, compare the preview cards, then inspect the applied UI kit. Reuse assets and fonts directly when building product surfaces.
+`;
+
+const README_WITHOUT_PRODUCT_OVERVIEW = `# Cherry Studio Design System
+
+https://github.com/cherryhq/cherry-studio
+
+## Overview
+
+- Category: Custom
+- Surface: web
+- Primary accent: #00b96b
+- Background: #ffffff
+- Foreground: #202124
+
+## Generated Files
+
+- DESIGN.md: canonical design system source.
+- colors_and_type.css: reusable CSS variables for color and type.
+- preview/: HTML review cards for type, color, spacing, components, and brand.
+- assets/: logo and brand asset references.
+- context/: structured source context captured during setup.
+- ui_kits/app/: interactive interface preview.
+- SKILL.md: agent-facing usage instructions.
+
+## Source Context
+
+Company/product context: https://github.com/cherryhq/cherry-studio
+GitHub/code links: https://github.com/cherryhq/cherry-studio
 `;
 
 const MARKDOWN_ONLY_AUDIT_SKILL = `# Cherry Studio Design System
@@ -778,6 +810,48 @@ describe('connectors tool CLI', () => {
         code: 'missing_skill_frontmatter',
         path: 'SKILL.md',
         message: expect.stringContaining('YAML frontmatter'),
+      }),
+    ]));
+
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('warns when README.md lacks a source-backed product overview', async () => {
+    const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'od-package-audit-readme-overview-'));
+    process.chdir(tmpDir);
+    await mkdir(path.join(tmpDir, 'preview'), { recursive: true });
+    await mkdir(path.join(tmpDir, 'ui_kits/app/components'), { recursive: true });
+    await writeFile(path.join(tmpDir, 'DESIGN.md'), AUDIT_DESIGN_MD);
+    await writeFile(path.join(tmpDir, 'README.md'), README_WITHOUT_PRODUCT_OVERVIEW);
+    await writeFile(path.join(tmpDir, 'SKILL.md'), AUDIT_SKILL);
+    await writeFile(path.join(tmpDir, 'colors_and_type.css'), AUDIT_TOKENS_CSS);
+    for (const fileName of [
+      'colors-primary.html',
+      'colors-theme-light.html',
+      'typography-specimens.html',
+      'spacing-tokens.html',
+      'components-buttons.html',
+      'brand-assets.html',
+    ]) {
+      await writeFile(path.join(tmpDir, 'preview', fileName), auditHtml(fileName));
+    }
+    await writeFile(path.join(tmpDir, 'ui_kits/app/index.html'), auditUiKitIndex());
+    await writeFile(path.join(tmpDir, 'ui_kits/app/README.md'), '# UI kit\n');
+    for (const componentName of AUDIT_COMPONENT_FILES) {
+      await writeFile(
+        path.join(tmpDir, 'ui_kits/app/components', componentName),
+        auditUiKitComponent(componentName),
+      );
+    }
+
+    const result = await runConnectorsToolCli(['design-system-package-audit', '--path', tmpDir]);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(stdoutOutput.join('')).warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'readme_missing_product_overview',
+        path: 'README.md',
+        message: expect.stringContaining('Product Overview'),
       }),
     ]));
 

@@ -1525,6 +1525,17 @@ async function auditDesignSystemPackage(
       );
     }
   }
+  if (fileSet.has('README.md')) {
+    const readmeText = await readAuditText(projectPath, 'README.md');
+    if (readmeText !== undefined && !readmeHasProductOverview(readmeText)) {
+      addIssue(
+        'warning',
+        'readme_missing_product_overview',
+        'README.md should include a Claude-style Product Overview or Product Context section that explains the source product, primary surfaces, and core capabilities instead of only listing tokens or generated files.',
+        'README.md',
+      );
+    }
+  }
   for (const docPath of ['DESIGN.md', 'README.md', 'SKILL.md', 'ui_kits/app/README.md']) {
     if (!fileSet.has(docPath)) continue;
     const text = await readAuditText(projectPath, docPath);
@@ -1875,6 +1886,19 @@ function skillHasAgentFrontmatter(text: string): boolean {
   return /^name:\s+\S+/mu.test(frontmatter)
     && /^description:\s+\S+/mu.test(frontmatter)
     && /^user-invocable:\s+(true|false)/imu.test(frontmatter);
+}
+
+function readmeHasProductOverview(text: string): boolean {
+  const section = [
+    markdownSection(text, 'Product Overview'),
+    markdownSection(text, 'Product Context'),
+    markdownSection(text, 'Overview'),
+  ].find((value): value is string => value !== undefined && value.trim().length > 0);
+  if (section === undefined) return false;
+  const body = section.trim();
+  return body.length >= 180
+    && /\b(product|app|application|workspace|client|platform|tool|service)\b/iu.test(body)
+    && /\b(supports?|provides?|features?|includes?|built|designed|helps?|enables?|offers?)\b/iu.test(body);
 }
 
 function validateDesignRules(text: string): string | undefined {

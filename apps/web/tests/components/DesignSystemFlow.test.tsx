@@ -257,6 +257,18 @@ describe('DesignSystemCreationFlow', () => {
     expect(mocks.patchProject).toHaveBeenCalledWith(
       project.id,
       expect.objectContaining({
+        pendingPrompt: expect.stringContaining('Write `README.md` as a reusable package guide'),
+      }),
+    );
+    expect(mocks.patchProject).toHaveBeenCalledWith(
+      project.id,
+      expect.objectContaining({
+        pendingPrompt: expect.stringContaining('Include a source-backed Product Overview/Product Context section'),
+      }),
+    );
+    expect(mocks.patchProject).toHaveBeenCalledWith(
+      project.id,
+      expect.objectContaining({
         pendingPrompt: expect.stringContaining('expose each loaded component as `window.ComponentName`'),
       }),
     );
@@ -391,6 +403,11 @@ describe('DesignSystemCreationFlow', () => {
       project.id,
       'context/source-context.md',
       expect.stringContaining('must describe the final focused preview cards'),
+    );
+    expect(mocks.writeProjectTextFile).toHaveBeenCalledWith(
+      project.id,
+      'context/source-context.md',
+      expect.stringContaining('README.md should include a source-backed Product Overview/Product Context section'),
     );
     expect(mocks.writeProjectTextFile).toHaveBeenCalledWith(
       project.id,
