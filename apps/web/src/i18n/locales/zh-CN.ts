@@ -39,6 +39,25 @@ export const zhCN: Dict = {
   'common.daysShort': '{n}天',
   'common.untitled': '未命名',
 
+  'plugins.availableDetails.provenance': '来源',
+  'plugins.availableDetails.provenanceLine': '来自 {source} · {trust} · {resolved}',
+  'plugins.availableDetails.provenanceLineWithIntegrity': '来自 {source} · {trust} · {resolved} · {integrity}',
+  'plugins.availableDetails.install': '安装',
+  'plugins.availableDetails.version': '版本',
+  'plugins.availableDetails.pluginVersion': '插件版本',
+  'plugins.availableDetails.copyInstallCommand': '复制安装命令',
+  'plugins.availableDetails.copied': '已复制',
+  'plugins.availableDetails.deprecatedPrefix': '已弃用：{message}',
+  'plugins.availableDetails.deprecatedFallback': '此版本已标记为弃用。',
+  'plugins.availableDetails.yanked': '已撤回。',
+  'plugins.availableDetails.yankedWithReason': '已撤回：{reason}',
+  'plugins.availableDetails.versionDeprecatedSuffix': '（已弃用）',
+  'plugins.availableDetails.versionYankedSuffix': '（已撤回）',
+  'plugins.availableDetails.ref': '引用',
+  'plugins.availableDetails.integrity': '完整性',
+  'plugins.availableDetails.permissions': '权限',
+  'plugins.availableDetails.capabilitySummary': '能力摘要',
+
   'app.brand': 'Open Design',
   'app.brandPill': '研究预览版',
   'app.brandSubtitle': '由 Nexu Labs 出品',
@@ -142,9 +161,15 @@ export const zhCN: Dict = {
   'settings.themeDark': '深色',
   'settings.agentModelHead': '模型：',
   'settings.modelPicker': '模型',
+  'settings.modelSourceLive': 'Live from CLI',
+  'settings.modelSourceFallback': 'Fallback list',
   'settings.reasoningPicker': '推理强度',
   'settings.modelPickerHint':
     '当 CLI 提供 `models` 命令时会自动拉取。选择「默认」则沿用 CLI 自身的配置；选择「自定义」可手动输入任何 CLI 支持的模型 id。',
+  'settings.modelPickerLiveHint':
+    'Models were refreshed from the installed CLI. Default still uses the CLI config.',
+  'settings.modelPickerFallbackHint':
+    'Using Open Design fallback models because the installed CLI did not return live model metadata. Rescan after updating or logging in to the CLI.',
   'settings.cliEnvTitle': 'CLI 配置位置',
   'settings.cliEnvHint':
     '为打包版应用运行和 agent 检测设置非敏感配置目录。',

@@ -39,6 +39,25 @@ export const en: Dict = {
   'common.daysShort': '{n}d',
   'common.untitled': 'Untitled',
 
+  'plugins.availableDetails.provenance': 'Provenance',
+  'plugins.availableDetails.provenanceLine': 'from {source} · {trust} · {resolved}',
+  'plugins.availableDetails.provenanceLineWithIntegrity': 'from {source} · {trust} · {resolved} · {integrity}',
+  'plugins.availableDetails.install': 'Install',
+  'plugins.availableDetails.version': 'Version',
+  'plugins.availableDetails.pluginVersion': 'Plugin version',
+  'plugins.availableDetails.copyInstallCommand': 'Copy install command',
+  'plugins.availableDetails.copied': 'Copied',
+  'plugins.availableDetails.deprecatedPrefix': 'Deprecated: {message}',
+  'plugins.availableDetails.deprecatedFallback': 'This version has been marked deprecated.',
+  'plugins.availableDetails.yanked': 'Yanked.',
+  'plugins.availableDetails.yankedWithReason': 'Yanked: {reason}',
+  'plugins.availableDetails.versionDeprecatedSuffix': ' (deprecated)',
+  'plugins.availableDetails.versionYankedSuffix': ' (yanked)',
+  'plugins.availableDetails.ref': 'Ref',
+  'plugins.availableDetails.integrity': 'Integrity',
+  'plugins.availableDetails.permissions': 'Permissions',
+  'plugins.availableDetails.capabilitySummary': 'Capability summary',
+
   'app.brand': 'Open Design',
   'app.brandPill': 'Research Preview',
   'app.brandSubtitle': 'by Nexu Labs',
@@ -142,9 +161,15 @@ export const en: Dict = {
   'settings.themeDark': 'Dark',
   'settings.agentModelHead': 'Model for:',
   'settings.modelPicker': 'Model',
+  'settings.modelSourceLive': 'Live from CLI',
+  'settings.modelSourceFallback': 'Fallback list',
   'settings.reasoningPicker': 'Reasoning effort',
   'settings.modelPickerHint':
     'Default uses the CLI’s own config. Custom… lets you type any model id.',
+  'settings.modelPickerLiveHint':
+    'Models were refreshed from the installed CLI. Default still uses the CLI’s own config.',
+  'settings.modelPickerFallbackHint':
+    'Using Open Design’s fallback model list because the installed CLI did not return live model metadata. Rescan after updating or logging in to the CLI.',
   'settings.cliEnvTitle': 'Advanced: proxy & custom paths',
   'settings.cliEnvHint':
     'Use these only if you route CLI traffic through your own proxy or installed the binary in a non-standard location. Secrets stay in local app config and only the selected CLI sees them.',

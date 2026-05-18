@@ -69,6 +69,26 @@ export interface Dict {
   'common.daysShort': string;
   'common.untitled': string;
 
+  // Plugin registry / details
+  'plugins.availableDetails.provenance': string;
+  'plugins.availableDetails.provenanceLine': string;
+  'plugins.availableDetails.provenanceLineWithIntegrity': string;
+  'plugins.availableDetails.install': string;
+  'plugins.availableDetails.version': string;
+  'plugins.availableDetails.pluginVersion': string;
+  'plugins.availableDetails.copyInstallCommand': string;
+  'plugins.availableDetails.copied': string;
+  'plugins.availableDetails.deprecatedPrefix': string;
+  'plugins.availableDetails.deprecatedFallback': string;
+  'plugins.availableDetails.yanked': string;
+  'plugins.availableDetails.yankedWithReason': string;
+  'plugins.availableDetails.versionDeprecatedSuffix': string;
+  'plugins.availableDetails.versionYankedSuffix': string;
+  'plugins.availableDetails.ref': string;
+  'plugins.availableDetails.integrity': string;
+  'plugins.availableDetails.permissions': string;
+  'plugins.availableDetails.capabilitySummary': string;
+
   // App / brand
   'app.brand': string;
   'app.brandPill': string;
@@ -166,8 +186,12 @@ export interface Dict {
   'settings.themeDark': string;
   'settings.agentModelHead': string;
   'settings.modelPicker': string;
+  'settings.modelSourceLive': string;
+  'settings.modelSourceFallback': string;
   'settings.reasoningPicker': string;
   'settings.modelPickerHint': string;
+  'settings.modelPickerLiveHint': string;
+  'settings.modelPickerFallbackHint': string;
   'settings.cliEnvTitle': string;
   'settings.cliEnvHint': string;
   'settings.cliEnvClaudeConfigDir': string;
