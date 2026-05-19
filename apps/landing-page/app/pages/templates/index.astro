@@ -45,7 +45,13 @@ const jsonLd = {
               <span class="template-thumb template-thumb-empty" aria-hidden="true" />
             )}
             <span class={`meta-tag ${t.origin === 'live-artifact' ? 'coral' : ''}`}>
-              {t.origin === 'live-artifact' ? 'Live Artifact' : 'Skill template'}
+              {t.origin === 'live-artifact'
+                ? 'Live Artifact'
+                : t.origin === 'design-template'
+                  ? t.mode
+                    ? `Design template · ${t.mode}`
+                    : 'Design template'
+                  : 'Skill template'}
             </span>
             <span class="template-name">{t.name}</span>
             <p class="template-summary">{t.summary}</p>

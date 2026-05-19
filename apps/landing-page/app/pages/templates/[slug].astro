@@ -1,10 +1,11 @@
 ---
 /*
- * /templates/<slug>/ — detail page for Live Artifact templates.
+ * /templates/<slug>/ — detail page for Live Artifact templates and
+ * design-templates.
  *
- * Skill-mode templates are listed on `/templates/` but link straight
- * to `/skills/<slug>/`, so this page only generates routes for the
- * Live Artifact bundles under `templates/live-artifacts/`.
+ * Skill-mode templates (origin === 'skill') are listed on `/templates/`
+ * but link straight to `/skills/<slug>/`, so this page does not generate
+ * routes for them.
  */
 import Layout from '../../_components/sub-page-layout.astro';
 import LazyImg from '../../_components/lazy-img.astro';
@@ -13,7 +14,7 @@ import { getTemplateRecords, type TemplateRecord } from '../../_lib/catalog';
 export async function getStaticPaths() {
   const records = await getTemplateRecords();
   return records
-    .filter((t) => t.origin === 'live-artifact')
+    .filter((t) => t.origin === 'live-artifact' || t.origin === 'design-template')
     .map((template) => ({
       params: { slug: template.slug },
       props: { template },
@@ -25,6 +26,9 @@ interface Props {
 }
 
 const { template } = Astro.props as Props;
+
+const isLiveArtifact = template.origin === 'live-artifact';
+const originLabel = isLiveArtifact ? 'Live Artifact' : 'Design Template';
 
 const title = `${template.name} — Open Design template`;
 const description = template.summary;
@@ -53,7 +57,7 @@ const jsonLd = {
     <header class="detail-head">
       <span class="label">
         Template
-        <span class="ix">· Live Artifact</span>
+        <span class="ix">· {originLabel}</span>
       </span>
       <h1 class="display">{template.name}<span class="dot">.</span></h1>
       <p class="lead">{template.summary}</p>
@@ -75,19 +79,42 @@ const jsonLd = {
       </figure>
     )}
 
-    <section class="detail-block">
-      <h2>What's in this template</h2>
-      <p class="block-lead">
-        Live Artifact templates ship as a folder you can copy verbatim
-        into your workspace. They include a <code>template.html</code>
-        renderer, a <code>data.json</code> with the seed values, and a
-        README describing the connector wiring.
-      </p>
-      <ul class="trigger-list">
-        <li><code>template.html</code> — the artifact renderer</li>
-        <li><code>data.json</code> — seed values for offline / preview rendering</li>
-        <li><code>README.md</code> — connector wiring, refresh cadence, customization notes</li>
-      </ul>
-    </section>
+    {isLiveArtifact ? (
+      <section class="detail-block">
+        <h2>What's in this template</h2>
+        <p class="block-lead">
+          Live Artifact templates ship as a folder you can copy verbatim
+          into your workspace. They include a <code>template.html</code>
+          renderer, a <code>data.json</code> with the seed values, and a
+          README describing the connector wiring.
+        </p>
+        <ul class="trigger-list">
+          <li><code>template.html</code> — the artifact renderer</li>
+          <li><code>data.json</code> — seed values for offline / preview rendering</li>
+          <li><code>README.md</code> — connector wiring, refresh cadence, customization notes</li>
+        </ul>
+      </section>
+    ) : (
+      <section class="detail-block">
+        <h2>What's in this template</h2>
+        <p class="block-lead">
+          Design templates ship as a folder the agent renders into a
+          project artifact. Each entry pairs a <code>SKILL.md</code>
+          contract with a baked <code>example.html</code> the gallery
+          previews and the agent uses as a structural reference.
+        </p>
+        <ul class="trigger-list">
+          <li><code>SKILL.md</code> — name, triggers, mode, scenario, and
+            the rendering instructions the agent follows</li>
+          <li><code>example.html</code> — the baked sample the gallery
+            screenshots and the agent treats as the canonical layout</li>
+          {template.mode && (
+            <li>
+              <code>od.mode</code> — <code>{template.mode}</code>
+            </li>
+          )}
+        </ul>
+      </section>
+    )}
   </article>
 </Layout>

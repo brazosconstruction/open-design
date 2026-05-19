@@ -4,8 +4,9 @@
  * Walks every renderable artifact in the repo and saves a thumbnail
  * to `apps/landing-page/public/previews/<bucket>/<slug>.webp`:
  *
- *   skills/<slug>/example.html               → /previews/skills/<slug>.webp
- *   templates/live-artifacts/<slug>/index.html → /previews/templates/live-<slug>.webp
+ *   skills/<slug>/example.html                  → /previews/skills/<slug>.webp
+ *   design-templates/<slug>/example.html        → /previews/design-templates/<slug>.webp
+ *   templates/live-artifacts/<slug>/index.html  → /previews/templates/live-<slug>.webp
  *   templates/live-artifacts/<slug>/preview.png → reused verbatim where it exists
  *
  * Run with: `pnpm --filter @open-design/landing-page previews`
@@ -29,6 +30,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const LANDING_ROOT = path.resolve(HERE, '..');
 const REPO_ROOT = path.resolve(LANDING_ROOT, '../..');
 const SKILLS_DIR = path.join(REPO_ROOT, 'skills');
+const DESIGN_TEMPLATES_DIR = path.join(REPO_ROOT, 'design-templates');
 const TEMPLATES_DIR = path.join(REPO_ROOT, 'templates/live-artifacts');
 const OUT_DIR = path.join(LANDING_ROOT, 'public/previews');
 
@@ -36,7 +38,7 @@ const VIEWPORT = { width: 1440, height: 900 } as const;
 const SETTLE_MS = 800; // wait after `load` for fonts / R2 images / JS
 
 interface Job {
-  bucket: 'skills' | 'templates';
+  bucket: 'skills' | 'templates' | 'design-templates';
   slug: string;
   htmlPath: string;
   /** Optional ready-made preview to copy verbatim (skips browser). */
@@ -46,19 +48,48 @@ interface Job {
 async function discoverJobs(): Promise<Job[]> {
   const jobs: Job[] = [];
 
-  const skillEntries = await readdir(SKILLS_DIR, { withFileTypes: true });
-  for (const entry of skillEntries) {
-    if (!entry.isDirectory()) continue;
-    const example = path.join(SKILLS_DIR, entry.name, 'example.html');
-    if (existsSync(example)) {
-      jobs.push({
-        bucket: 'skills',
-        slug: entry.name,
-        htmlPath: example,
-      });
+  // skills/<slug>/example.html
+  if (existsSync(SKILLS_DIR)) {
+    const skillEntries = await readdir(SKILLS_DIR, { withFileTypes: true });
+    for (const entry of skillEntries) {
+      if (!entry.isDirectory()) continue;
+      const example = path.join(SKILLS_DIR, entry.name, 'example.html');
+      if (existsSync(example)) {
+        jobs.push({
+          bucket: 'skills',
+          slug: entry.name,
+          htmlPath: example,
+        });
+      }
     }
   }
 
+  // design-templates/<slug>/example.html — the rendering catalogue split
+  // out of skills/. Slug is the folder name verbatim because the catalog
+  // data layer (`shapeDesignTemplate`) addresses these previews under
+  // `/previews/design-templates/<slug>.webp` with no extra prefix.
+  if (existsSync(DESIGN_TEMPLATES_DIR)) {
+    const designEntries = await readdir(DESIGN_TEMPLATES_DIR, {
+      withFileTypes: true,
+    });
+    for (const entry of designEntries) {
+      if (!entry.isDirectory()) continue;
+      const example = path.join(
+        DESIGN_TEMPLATES_DIR,
+        entry.name,
+        'example.html',
+      );
+      if (existsSync(example)) {
+        jobs.push({
+          bucket: 'design-templates',
+          slug: entry.name,
+          htmlPath: example,
+        });
+      }
+    }
+  }
+
+  // templates/live-artifacts/<slug>/{preview.png,index.html}
   if (existsSync(TEMPLATES_DIR)) {
     const templateEntries = await readdir(TEMPLATES_DIR, { withFileTypes: true });
     for (const entry of templateEntries) {

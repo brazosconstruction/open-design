@@ -67,6 +67,21 @@ const templates = defineCollection({
   schema: z.object({}).passthrough(),
 });
 
+// `design-templates/<slug>/SKILL.md` — the rendering catalogue split out
+// from `skills/` per `specs/current/skills-and-design-templates.md`.
+// Same SKILL.md schema as a functional skill, but classified as a design
+// template (the agent renders it into an artifact; it does not "do work"
+// on user input). Surfaced under `/templates/` alongside the live-artifact
+// bundles above so the marketing catalogue stays in step with the daemon's
+// `/api/design-templates` registry.
+const designTemplates = defineCollection({
+  loader: glob({
+    base: '../../design-templates',
+    pattern: '*/SKILL.md',
+  }),
+  schema: skillSchema,
+});
+
 // Blog posts live in `app/content/blog/*.md`. Each post must declare a typed
 // frontmatter block matching the schema below. The list page reads the
 // collection via `getCollection('blog')` and the dynamic route renders each
@@ -87,4 +102,11 @@ const blog = defineCollection({
   }),
 });
 
-export const collections = { skills, systems, craft, templates, blog };
+export const collections = {
+  skills,
+  systems,
+  craft,
+  templates,
+  'design-templates': designTemplates,
+  blog,
+};

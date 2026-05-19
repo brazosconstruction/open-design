@@ -35,7 +35,9 @@ const PREVIEWS_ROOT = path.resolve(
  * (e.g., after a future sharp post-processor or a manually committed
  * template asset).
  */
-function listPreviews(bucket: 'skills' | 'systems' | 'templates'): Map<string, string> {
+function listPreviews(
+  bucket: 'skills' | 'systems' | 'templates' | 'design-templates',
+): Map<string, string> {
   const dir = path.join(PREVIEWS_ROOT, bucket);
   if (!existsSync(dir)) return new Map();
   const map = new Map<string, string>();
@@ -52,7 +54,7 @@ function listPreviews(bucket: 'skills' | 'systems' | 'templates'): Map<string, s
 }
 
 function previewUrlFor(
-  bucket: 'skills' | 'systems' | 'templates',
+  bucket: 'skills' | 'systems' | 'templates' | 'design-templates',
   slug: string,
   available: Map<string, string>,
 ): string | null {
@@ -396,22 +398,37 @@ export async function getCraftRecords(): Promise<ReadonlyArray<CraftRecord>> {
 }
 
 // ---------------------------------------------------------------------------
-// Templates — Live Artifacts + skills with `mode: template`
+// Templates — Live Artifacts + design-templates registry + skills with `mode: template`
+//
+// Three sources, one merged catalogue:
+//
+//   1. `templates/live-artifacts/<slug>/README.md` — Live Artifact bundles.
+//      One concrete instance today (`otd-operations-brief`).
+//   2. `design-templates/<slug>/SKILL.md` — the rendering catalogue split
+//      out of `skills/` per `specs/current/skills-and-design-templates.md`.
+//      ~110 entries. Same schema as functional skills, but classified as
+//      design templates (the agent renders them into artifacts).
+//   3. `skills/<slug>/SKILL.md` with `od.mode === 'template'` — functional
+//      skills that happen to identify as templates. Linked back to the
+//      skill detail page rather than getting their own template route.
 // ---------------------------------------------------------------------------
 
 export interface TemplateRecord {
   slug: string;
   name: string;
   summary: string;
-  origin: 'live-artifact' | 'skill';
+  origin: 'live-artifact' | 'design-template' | 'skill';
   source: string;
   detailHref: string;
   /** Skill body / template README body (Markdown). */
   body: string;
   previewUrl: string | null;
+  /** `od.mode` for design-template entries — surfaced as a meta tag. */
+  mode?: string;
 }
 
 export type TemplateEntry = CollectionEntry<'templates'>;
+export type DesignTemplateEntry = CollectionEntry<'design-templates'>;
 
 export function shapeLiveArtifactTemplate(
   entry: TemplateEntry,
@@ -445,14 +462,59 @@ export function shapeLiveArtifactTemplate(
   };
 }
 
+export function shapeDesignTemplate(
+  entry: DesignTemplateEntry,
+  previews: Map<string, string>,
+): TemplateRecord {
+  // Folder slug is the part before the `/SKILL` segment in `entry.id`.
+  const slug = entry.id.split('/')[0] ?? entry.id;
+  const data = entry.data as {
+    name?: string;
+    description?: string;
+    od?: { mode?: string };
+  };
+  const description = (data.description ?? '').trim();
+  return {
+    slug,
+    name: data.name ?? slug,
+    summary: firstParagraph(description, slug),
+    origin: 'design-template',
+    source: `${REPO_TREE}/design-templates/${slug}`,
+    detailHref: `/templates/${slug}/`,
+    body: entry.body ?? '',
+    previewUrl: previewUrlFor('design-templates', slug, previews),
+    mode: data.od?.mode,
+  };
+}
+
 export async function getTemplateRecords(): Promise<ReadonlyArray<TemplateRecord>> {
-  const previews = listPreviews('templates');
+  // Live Artifacts and design-templates each render their own preview tree:
+  //   - /previews/templates/live-<slug>.webp  for live-artifact bundles
+  //   - /previews/design-templates/<slug>.webp for design-template entries
+  // Skill-mode skill templates reuse /previews/skills/ via the SkillRecord.
+  const livePreviews = listPreviews('templates');
+  const designPreviews = listPreviews('design-templates');
+
   const liveEntries = await getCollection('templates');
-  const liveRecords = liveEntries.map((entry) => shapeLiveArtifactTemplate(entry, previews));
+  const liveRecords = liveEntries.map((entry) =>
+    shapeLiveArtifactTemplate(entry, livePreviews),
+  );
+
+  const designEntries = await getCollection('design-templates');
+  const designRecords = designEntries.map((entry) =>
+    shapeDesignTemplate(entry, designPreviews),
+  );
 
   const skillRecords = await getSkillRecords();
+  // Skills under `skills/` may still declare `od.mode === 'template'`.
+  // After the design-templates split, those should be the truly functional
+  // entries that happen to render as a template (e.g. utilities); the bulk
+  // of rendering catalogue lives in `design-templates/` now. Suppress
+  // duplicates: if a skill slug also appears as a design-template, the
+  // design-template entry wins (it carries the canonical SKILL.md).
+  const designSlugs = new Set(designRecords.map((d) => d.slug));
   const skillTemplates: TemplateRecord[] = skillRecords
-    .filter((s) => s.mode === 'template')
+    .filter((s) => s.mode === 'template' && !designSlugs.has(s.slug))
     .map((s) => ({
       slug: `skill-${s.slug}`,
       name: s.name,
@@ -461,14 +523,32 @@ export async function getTemplateRecords(): Promise<ReadonlyArray<TemplateRecord
       source: s.source,
       detailHref: `/skills/${s.slug}/`,
       body: s.body,
-      // Templates render skill-mode skill thumbnails reusing the
-      // /previews/skills/ tree (no separate render).
       previewUrl: s.previewUrl,
+      mode: s.mode,
     }));
 
-  return [...liveRecords, ...skillTemplates].sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
+  const all = [...liveRecords, ...designRecords, ...skillTemplates];
+
+  // Slug uniqueness check — design-template slug collisions with
+  // live-artifact slugs (which carry a `live-` prefix) or skill-template
+  // slugs (which carry a `skill-` prefix) should be impossible by
+  // construction, but verifying at build time catches authoring mistakes
+  // (e.g. a future design-template named `live-foo`) before they ship as
+  // duplicate /templates/<slug>/ routes that crash Astro's static build.
+  const seen = new Map<string, TemplateRecord>();
+  for (const rec of all) {
+    const prior = seen.get(rec.slug);
+    if (prior) {
+      throw new Error(
+        `Duplicate template slug "${rec.slug}" — already registered as ` +
+          `${prior.origin} (${prior.source}); refusing to add a second ` +
+          `${rec.origin} entry from ${rec.source}.`,
+      );
+    }
+    seen.set(rec.slug, rec);
+  }
+
+  return all.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // ---------------------------------------------------------------------------
