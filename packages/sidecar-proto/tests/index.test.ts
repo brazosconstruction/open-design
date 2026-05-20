@@ -104,35 +104,6 @@ describe("open-design sidecar contract", () => {
     ).toThrow();
   });
 
-  it("accepts a mint-import-token payload with a baseDir", () => {
-    const message = {
-      input: { baseDir: "/Users/u/proj" },
-      type: SIDECAR_MESSAGES.MINT_IMPORT_TOKEN,
-    };
-    expect(normalizeDaemonSidecarMessage(message)).toEqual(message);
-  });
-
-  it("rejects mint-import-token payloads missing or empty baseDir", () => {
-    expect(() =>
-      normalizeDaemonSidecarMessage({
-        input: { baseDir: "" },
-        type: SIDECAR_MESSAGES.MINT_IMPORT_TOKEN,
-      }),
-    ).toThrow();
-    expect(() =>
-      normalizeDaemonSidecarMessage({
-        input: {},
-        type: SIDECAR_MESSAGES.MINT_IMPORT_TOKEN,
-      }),
-    ).toThrow();
-    expect(() =>
-      normalizeDaemonSidecarMessage({
-        input: { baseDir: "/p", extra: "bad" },
-        type: SIDECAR_MESSAGES.MINT_IMPORT_TOKEN,
-      }),
-    ).toThrow();
-  });
-
   it("validates desktop IPC message inputs", () => {
     expect(normalizeDesktopSidecarMessage({ input: { expression: "location.href" }, type: SIDECAR_MESSAGES.EVAL })).toEqual({
       input: { expression: "location.href" },

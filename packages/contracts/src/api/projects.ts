@@ -126,12 +126,6 @@ export interface ProjectMetadata {
   // it set `baseDir` outside the trusted flow. Privileged: rejected
   // by `POST /api/projects` and `PATCH /api/projects/:id`.
   fromTrustedPicker?: true;
-  // Hint stamped by the home composer's "选择工作目录" chip — the parent
-  // directory the user intends the project to live under. Recorded for
-  // the agent + future automation (e.g. paseo-style hand-off). Today the
-  // daemon's file writes still target the canonical resolvedDir; honouring
-  // this hint end-to-end is a follow-up.
-  userWorkingDir?: string;
   imageModel?: string;
   imageAspect?: MediaAspect;
   imageStyle?: string;

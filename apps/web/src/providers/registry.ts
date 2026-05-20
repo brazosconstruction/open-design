@@ -1752,41 +1752,6 @@ export async function fetchHostEditors(): Promise<
   return (await resp.json()) as import('@open-design/contracts').HostEditorsResponse;
 }
 
-// "Replace working directory" — points an existing project at a new
-// folder. Mirrors the import-folder trust gate (the daemon validates,
-// runs realpath, and checks sandbox boundaries) but updates the
-// existing project record rather than minting a new one. The web layer
-// has to acquire the desktop-import token before calling this in
-// trusted-picker builds; the unsigned `openFolderDialog` path is the
-// fallback used in dev / browser builds where the gate is off.
-export async function replaceProjectWorkingDir(
-  projectId: string,
-  baseDir: string,
-  desktopImportToken?: string,
-): Promise<{ baseDir: string; entryFile: string | null }> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (desktopImportToken) {
-    headers['x-od-desktop-import-token'] = desktopImportToken;
-  }
-  const resp = await fetch(
-    `/api/projects/${encodeURIComponent(projectId)}/working-dir`,
-    {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ baseDir }),
-    },
-  );
-  if (!resp.ok) {
-    const body = await readApiErrorBody(resp);
-    throw new Error(body.message);
-  }
-  const data = (await resp.json()) as {
-    baseDir: string;
-    entryFile: string | null;
-  };
-  return data;
-}
-
 export async function openProjectInEditor(
   projectId: string,
   editorId: import('@open-design/contracts').HostEditorId,

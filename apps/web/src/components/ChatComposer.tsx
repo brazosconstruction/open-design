@@ -32,7 +32,6 @@ import { buildVisualAnnotationAttachment } from '../comments';
 import { Icon } from "./Icon";
 import { PluginDetailsModal } from "./PluginDetailsModal";
 import { PluginsSection, type PluginsSectionHandle } from "./PluginsSection";
-import { WorkingDirPill } from "./WorkingDirPill";
 import { BUILT_IN_PETS, CUSTOM_PET_ID, resolveActivePet } from "./pet/pets";
 import {
   buildInlineMentionParts,
@@ -1628,9 +1627,6 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
           </div>
         </div>
         {uploadError ? <span className="composer-hint">{uploadError}</span> : null}
-        {projectId ? (
-          <WorkingDirPill projectId={projectId} />
-        ) : null}
         {detailsRecord ? (
           <PluginDetailsModal
             record={detailsRecord}

@@ -8,7 +8,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import {
   isDesktopAuthGateActive,
-  mintImportTokenFromCurrentSecret,
   resetDesktopAuthForTests,
   setDesktopAuthSecret,
   signDesktopImportToken,
@@ -36,7 +35,7 @@ describe('desktop-import-token gate', () => {
     };
     baseUrl = started.url;
     server = started.server;
-  }, 30_000);
+  });
 
   beforeEach(() => {
     // Each test starts in "no secret registered" mode unless it
@@ -345,134 +344,6 @@ describe('desktop-import-token gate', () => {
       { 'x-od-desktop-import-token': token },
     );
     expect(resp.status).toBe(403);
-  });
-
-  // ---- POST /api/projects/:id/working-dir parity ----------------------
-  // The "清空并替换目录" endpoint is gated by the same HMAC token model
-  // as /api/import/folder. These tests pin parity so a future divergence
-  // (one route hardens but the other doesn't) fails fast.
-
-  let projectSeq = 0;
-  async function createProject(): Promise<string> {
-    projectSeq += 1;
-    const id = `wd-test-${Date.now()}-${projectSeq}`;
-    const resp = await fetch(`${baseUrl}/api/projects`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, name: 'working-dir-test' }),
-    });
-    expect(resp.status).toBe(200);
-    const body = (await resp.json()) as { project: { id: string } };
-    return body.project.id;
-  }
-
-  async function replaceWorkingDir(
-    projectId: string,
-    body: unknown,
-    headers: Record<string, string> = {},
-  ) {
-    return fetch(`${baseUrl}/api/projects/${encodeURIComponent(projectId)}/working-dir`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify(body),
-    });
-  }
-
-  it('working-dir: accepts unauthenticated replaces when no secret is registered', async () => {
-    const projectId = await createProject();
-    const folder = makeFolder();
-    const resp = await replaceWorkingDir(projectId, { baseDir: folder });
-    expect(resp.status).toBe(200);
-    const body = (await resp.json()) as {
-      baseDir: string;
-      project: { metadata?: { fromTrustedPicker?: boolean } };
-    };
-    expect(body.project.metadata?.fromTrustedPicker).toBeUndefined();
-    expect(body.baseDir).toBeTruthy();
-  });
-
-  it('working-dir: rejects replaces with no token when a secret is registered', async () => {
-    const projectId = await createProject();
-    const folder = makeFolder();
-    setDesktopAuthSecret(randomBytes(32));
-    const resp = await replaceWorkingDir(projectId, { baseDir: folder });
-    expect(resp.status).toBe(403);
-    const body = (await resp.json()) as { error?: { code?: string } };
-    expect(body.error?.code).toBe('FORBIDDEN');
-  });
-
-  it('working-dir: accepts a valid token, marks the project trusted, and rejects nonce replays', async () => {
-    const projectId = await createProject();
-    const folder = makeFolder();
-    const secret = randomBytes(32);
-    setDesktopAuthSecret(secret);
-    const exp = new Date(Date.now() + 30_000).toISOString();
-    const token = signDesktopImportToken(secret, folder, { nonce: 'workingdir-1', exp });
-    const okResp = await replaceWorkingDir(
-      projectId,
-      { baseDir: folder },
-      { 'x-od-desktop-import-token': token },
-    );
-    expect(okResp.status).toBe(200);
-    const okBody = (await okResp.json()) as {
-      project: { metadata?: { fromTrustedPicker?: boolean; baseDir?: string } };
-    };
-    expect(okBody.project.metadata?.fromTrustedPicker).toBe(true);
-    expect(okBody.project.metadata?.baseDir).toBeTruthy();
-
-    const replayResp = await replaceWorkingDir(
-      projectId,
-      { baseDir: folder },
-      { 'x-od-desktop-import-token': token },
-    );
-    expect(replayResp.status).toBe(403);
-  });
-
-  it('working-dir: stays fail-closed after the registered secret is cleared (sticky gate)', async () => {
-    const projectId = await createProject();
-    const folder = makeFolder();
-    setDesktopAuthSecret(randomBytes(32));
-    expect(isDesktopAuthGateActive()).toBe(true);
-    setDesktopAuthSecret(null);
-    expect(isDesktopAuthGateActive()).toBe(true);
-    const resp = await replaceWorkingDir(projectId, { baseDir: folder });
-    expect(resp.status).toBe(503);
-    const body = (await resp.json()) as { error?: { code?: string } };
-    expect(body.error?.code).toBe('DESKTOP_AUTH_PENDING');
-  });
-
-  it('working-dir: mintImportTokenFromCurrentSecret produces a token the route accepts', async () => {
-    // Pure-helper integration: the IPC mint path the CLI uses must
-    // produce a token the same daemon process can verify, end to end.
-    const projectId = await createProject();
-    const folder = makeFolder();
-    const secret = randomBytes(32);
-    setDesktopAuthSecret(secret);
-    const minted = mintImportTokenFromCurrentSecret(folder);
-    expect(minted).not.toBeNull();
-    expect(minted!.ok).toBe(true);
-    const token = (minted as { ok: true; token: string }).token;
-    const resp = await replaceWorkingDir(
-      projectId,
-      { baseDir: folder },
-      { 'x-od-desktop-import-token': token },
-    );
-    expect(resp.status).toBe(200);
-    const body = (await resp.json()) as {
-      project: { metadata?: { fromTrustedPicker?: boolean } };
-    };
-    expect(body.project.metadata?.fromTrustedPicker).toBe(true);
-  });
-
-  it('mintImportTokenFromCurrentSecret returns null when the gate is dormant', () => {
-    expect(mintImportTokenFromCurrentSecret('/some/path')).toBeNull();
-  });
-
-  it('mintImportTokenFromCurrentSecret returns structured failure when the secret is cleared after sticky-active', () => {
-    setDesktopAuthSecret(randomBytes(32));
-    setDesktopAuthSecret(null);
-    const result = mintImportTokenFromCurrentSecret('/some/path');
-    expect(result).toEqual({ ok: false, reason: 'desktop auth secret cleared' });
   });
 });
 

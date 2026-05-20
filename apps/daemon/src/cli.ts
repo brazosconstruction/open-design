@@ -9,7 +9,6 @@ import { runDesignSystemsToolCli } from './tools-design-systems-cli.js';
 import { runLiveArtifactsToolCli } from './tools-live-artifacts-cli.js';
 import { splitResearchSubcommand } from './research/cli-args.js';
 import { resolveDaemonUrl } from './daemon-url.js';
-import { mintImportTokenViaSidecar } from './cli-import-token.js';
 
 const argv = process.argv.slice(2);
 
@@ -149,7 +148,6 @@ const PROJECT_STRING_FLAGS = new Set([
   'daemon-url', 'name', 'skill', 'design-system', 'plugin', 'metadata-json',
   'pending-prompt', 'project', 'conversation', 'message', 'path', 'as',
   'agent', 'model', 'snapshot-id', 'inputs', 'grant-caps', 'editor',
-  'dir', 'working-dir',
 ]);
 const PROJECT_BOOLEAN_FLAGS = new Set(['help', 'h', 'json', 'follow']);
 // `od automation …` mirrors the Automations tab. Same surface, same
@@ -3684,7 +3682,6 @@ async function runProject(args) {
     console.log(`Usage:
   od project create [--name "<title>"] [--skill <id>] [--design-system <id>]
                     [--plugin <id>] [--inputs <json>] [--metadata-json <path|->]
-                    [--working-dir <path>]
   od project list                         List projects.
   od project info <id>                    Print one project.
   od project delete <id>                  Delete a project.
@@ -3693,10 +3690,6 @@ async function runProject(args) {
   od project open-in <id> --editor <slug> Open the project's working directory
                                           in the chosen editor (cursor, zed,
                                           vscode, finder, terminal, …).
-  od project working-dir <id>             Show the project's current working
-                                          directory.
-  od project working-dir <id> --dir <p>   Replace the project's working
-                                          directory (清空并替换目录).
   od project handoff <id> --conversation <id> --api-key <key> --model <model>
                     [--base-url <url>] [--max-tokens <n>]
                     Synthesize a resume-conversation handoff prompt.
@@ -3763,17 +3756,6 @@ Common options:
       if (flags['metadata-json']) {
         const mj = safeReadJsonFile(flags['metadata-json']);
         if (mj && typeof mj === 'object') body.metadata = mj;
-      }
-      // Mirror the home composer's "选择工作目录" chip: stamp the user's
-      // preferred working dir onto the new project's metadata so the
-      // agent + future automation can route work there. The daemon's
-      // file write path still targets resolvedDir; honouring this
-      // hint end-to-end is the same follow-up as the UI flow.
-      if (typeof flags['working-dir'] === 'string' && flags['working-dir'].length > 0) {
-        body.metadata = {
-          ...(body.metadata && typeof body.metadata === 'object' ? body.metadata : {}),
-          userWorkingDir: flags['working-dir'],
-        };
       }
       if (flags.plugin) body.pluginId = flags.plugin;
       if (flags.inputs) {
@@ -3853,55 +3835,6 @@ Common options:
       }
       if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
       console.log(`[project] opened ${id} in ${editor} (${data.path ?? ''})`);
-      return;
-    }
-    case 'working-dir': {
-      const id = rest.find((a) => !a.startsWith('-'));
-      if (!id) {
-        console.error('Usage: od project working-dir <id> [--dir <path>]');
-        process.exit(2);
-      }
-      const dir = typeof flags.dir === 'string' ? flags.dir : null;
-      if (dir) {
-        // Replace mode — POST to /working-dir with the new path. When
-        // the daemon's desktop-auth gate is active (a packaged desktop
-        // is paired with this daemon), the route refuses tokenless
-        // requests. Best-effort mint a token via the daemon's sidecar
-        // IPC so the same-user CLI invocation goes through. The IPC
-        // socket has user-only FS permissions, so minting a token here
-        // does not escalate privilege beyond what the caller already has.
-        const trimmedDir = dir.trim();
-        const headers = { 'content-type': 'application/json' };
-        const minted = await mintImportTokenViaSidecar(trimmedDir).catch(() => null);
-        if (minted && minted.ok === true) {
-          headers['x-od-desktop-import-token'] = minted.token;
-        } else if (minted && minted.ok === false) {
-          console.error(`[project] could not mint desktop import token: ${minted.reason}`);
-        }
-        const resp = await fetch(
-          `${base}/api/projects/${encodeURIComponent(id)}/working-dir`,
-          {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({ baseDir: trimmedDir }),
-          },
-        );
-        const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) {
-          if (flags.json) process.stdout.write(JSON.stringify(data, null, 2) + '\n');
-          else console.error(`POST /api/projects/${id}/working-dir failed: ${resp.status} ${JSON.stringify(data)}`);
-          process.exit(1);
-        }
-        if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
-        console.log(`[project] working-dir set to ${data.baseDir ?? trimmedDir}`);
-        return;
-      }
-      // Read mode — GET the project and print resolvedDir.
-      const resp = await fetch(`${base}/api/projects/${encodeURIComponent(id)}`);
-      if (!resp.ok) return structuredHttpFailure(resp, 'project-not-found');
-      const data = await resp.json();
-      if (flags.json) return process.stdout.write(JSON.stringify(data, null, 2) + '\n');
-      console.log(data.resolvedDir ?? '(no resolved dir)');
       return;
     }
     default:

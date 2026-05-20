@@ -61,13 +61,10 @@ export {
   isOpenPathAllowedForProject,
   signDesktopImportToken,
   pickAndImportFolder,
-  pickAndReplaceWorkingDir,
   type PathValidationResult,
   type ResolvedProjectDirContext,
   type PickAndImportFolderDeps,
   type PickAndImportFolderResult,
-  type PickAndReplaceWorkingDirDeps,
-  type PickAndReplaceWorkingDirResult,
 } from "./runtime.js";
 
 const TOOLS_DEV_PARENT_PID_ENV = SIDECAR_ENV.TOOLS_DEV_PARENT_PID;

@@ -18,11 +18,7 @@ import {
 } from "@open-design/sidecar";
 
 import { startDaemonRuntime, type StartedDaemonRuntime } from "../daemon-startup.js";
-import {
-  isDesktopAuthGateActive,
-  mintImportTokenFromCurrentSecret,
-  setDesktopAuthSecret,
-} from "../desktop-auth.js";
+import { isDesktopAuthGateActive, setDesktopAuthSecret } from "../desktop-auth.js";
 
 /**
  * PR #974 round 6 (mrcfps): pure wrapper that overlays the live
@@ -149,21 +145,6 @@ export async function startDaemonSidecar(runtime: SidecarRuntimeContext<SidecarS
           // renderer→arbitrary-baseDir→shell.openPath bypass.
           setDesktopAuthSecret(Buffer.from(request.input.secret, "base64"));
           return { accepted: true };
-        case SIDECAR_MESSAGES.MINT_IMPORT_TOKEN: {
-          // Local CLI tools (`od project working-dir --dir`) ask the
-          // daemon to mint a one-shot HMAC token bound to the requested
-          // baseDir, so they can drive the same trust-gated HTTP
-          // endpoints the renderer goes through. The IPC socket already
-          // has user-only FS permissions; minting a token does not
-          // escalate beyond what the caller could do on disk.
-          const minted = mintImportTokenFromCurrentSecret(request.input.baseDir);
-          if (minted == null) {
-            // Gate dormant — caller can POST without a token.
-            return { ok: false, reason: "desktop auth gate not active" };
-          }
-          if (!minted.ok) return minted;
-          return { ok: true, token: minted.token };
-        }
       }
     },
   });

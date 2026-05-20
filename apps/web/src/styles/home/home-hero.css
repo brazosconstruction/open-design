@@ -213,7 +213,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 8px;
+  margin-top: 0;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 .home-hero__input-card:focus-within {
@@ -278,13 +278,6 @@
   border-radius: 50%;
   background: var(--accent);
 }
-.home-hero__active-type-icon {
-  flex: 0 0 auto;
-  color: currentColor;
-}
-.home-hero__active-chip--context .home-hero__active-type-icon {
-  color: var(--text-muted);
-}
 .home-hero__active-clear {
   appearance: none;
   background: transparent;
@@ -325,7 +318,14 @@
   color: var(--text);
   font: inherit;
   font-size: 15px;
-  line-height: 1.55;
+  /* Generous line-height so adjacent slot/mention pills do not
+     collide vertically when the prompt wraps. Each pill paints a
+     2px ring via `box-shadow`; with a tight line-height the rings
+     from line N and line N+1 visually merge into a single bar.
+     Bumping the line-height leaves ~8px of clear space between
+     pill rows. The textarea below mirrors this value so the
+     overlay and the editable text stay pixel-aligned. */
+  line-height: 1.85;
   pointer-events: none;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -464,10 +464,20 @@
   z-index: 1;
   width: 100%;
   min-height: 84px;
-  resize: vertical;
+  /* The textarea height is driven by the auto-grow effect in
+     HomeHero.tsx, which writes an explicit pixel height after every
+     keystroke. We disable the native resize grip and internal
+     scrollbar so users cannot accidentally shrink the box, and so
+     content never disappears behind a scroll — the box just grows
+     to fit. The outer page handles overflow when the prompt is
+     very long. */
+  resize: none;
+  overflow: hidden;
   font: inherit;
   font-size: 15px;
-  line-height: 1.55;
+  /* Must match `.home-hero__prompt-highlight` so the editable
+     textarea and the highlight overlay wrap identically. */
+  line-height: 1.85;
   padding: 6px 6px;
   border: none;
   outline: none;
@@ -842,18 +852,15 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  flex: 1 1 auto;
-}
-.home-hero__foot-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
 }
 .home-hero__attach {
   appearance: none;
-  width: 32px;
-  height: 32px;
+  /* Match the submit button size and make the paper-clip glyph
+     readable at typical viewing distance. The previous 32px / 14px
+     glyph combo rendered the icon at roughly 11–12px after stroke
+     antialiasing and washed out against the white card. */
+  width: 38px;
+  height: 38px;
   flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: 50%;
@@ -872,10 +879,25 @@
   color: var(--accent);
   transform: translateY(-0.5px);
 }
+.home-hero__hint {
+  font-size: 11.5px;
+  color: var(--text-soft);
+}
+.home-hero__hint kbd {
+  font: inherit;
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-subtle);
+}
 .home-hero__submit {
   appearance: none;
-  width: 32px;
-  height: 32px;
+  /* Larger send button so the arrow glyph reads at typical viewing
+     distance and the primary call-to-action carries enough visual
+     weight against the surrounding muted controls. */
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   border: none;
   background: var(--accent);

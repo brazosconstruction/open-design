@@ -42,7 +42,6 @@ import {
   getDesktopAuthSecret,
   isDesktopAuthGateActive,
   isDesktopAuthRegistered,
-  mintImportTokenFromCurrentSecret,
   pruneExpiredImportNonces,
   resetDesktopAuthForTests,
   setDesktopAuthSecret,
@@ -52,7 +51,6 @@ import {
 export {
   isDesktopAuthGateActive,
   isDesktopAuthRegistered,
-  mintImportTokenFromCurrentSecret,
   resetDesktopAuthForTests,
   setDesktopAuthSecret,
   signDesktopImportToken,

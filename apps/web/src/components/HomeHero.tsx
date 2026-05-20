@@ -7,23 +7,28 @@
 // composed with the recent-projects strip and plugins section
 // without owning their data lifecycles.
 
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type {
   ClipboardEvent as ReactClipboardEvent,
   DragEvent as ReactDragEvent,
   ForwardedRef,
   KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
-import { Plug } from 'lucide-react';
 import type {
   ConnectorDetail,
-  DesignSystemSummary,
   InputFieldSpec,
   InstalledPluginRecord,
   McpServerConfig,
 } from '@open-design/contracts';
 import type { SkillSummary } from '../types';
-import { HomeHeroSettingsChips } from './HomeHeroSettingsChips';
 import { Icon, type IconName } from './Icon';
 import { PluginInputsForm } from './PluginInputsForm';
 import {
@@ -96,18 +101,6 @@ interface Props {
   onDismissExamples?: () => void;
   contextItemCount: number;
   error: string | null;
-  // Stage 1 of the home settings strip (image 1 of the brief): the
-  // user-chosen parent directory the new project will live under. Null
-  // means use the daemon's default location (.od/projects/<id>/).
-  workingDir?: string | null;
-  onChangeWorkingDir?: (dir: string | null) => void;
-  // Stage 2 of the home settings strip: the design system the new
-  // project should be stamped with. Threaded through PluginLoopSubmit
-  // to onCreateProject's designSystemId field.
-  designSystems?: DesignSystemSummary[];
-  designSystemsLoading?: boolean;
-  selectedDesignSystemId?: string | null;
-  onChangeDesignSystemId?: (id: string | null) => void;
 }
 
 type HomeMentionTab = 'all' | 'plugins' | 'skills' | 'mcp' | 'connectors';
@@ -175,12 +168,6 @@ export const HomeHero = forwardRef<HTMLTextAreaElement, Props>(function HomeHero
     onDismissExamples = () => undefined,
     contextItemCount,
     error,
-    workingDir = null,
-    onChangeWorkingDir,
-    designSystems = [],
-    designSystemsLoading = false,
-    selectedDesignSystemId = null,
-    onChangeDesignSystemId,
   },
   ref,
 ) {
@@ -378,6 +365,20 @@ export const HomeHero = forwardRef<HTMLTextAreaElement, Props>(function HomeHero
     setPromptScrollTop(inputElementRef.current?.scrollTop ?? 0);
   }, [prompt, promptOverlayParts]);
 
+  // Auto-grow the prompt textarea so the chat box height tracks the
+  // number of lines the user has typed. We never scroll the textarea
+  // internally (CSS sets `overflow: hidden` and `resize: none`), so
+  // the only height source of truth is `scrollHeight`. Resetting to
+  // `auto` before measuring forces the browser to recompute against
+  // the actual content, otherwise shrinking the prompt would leave
+  // the textarea stuck at its previous taller size.
+  useLayoutEffect(() => {
+    const el = inputElementRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [prompt]);
+
   const setInputRef = useCallback(
     (node: HTMLTextAreaElement | null) => {
       inputElementRef.current = node;
@@ -496,7 +497,7 @@ export const HomeHero = forwardRef<HTMLTextAreaElement, Props>(function HomeHero
                   onClick={() => onOpenPluginDetails(plugin)}
                   title={t('homeHero.pluginTitle', { title: plugin.title })}
                 >
-                  <Plug className="home-hero__active-type-icon" size={13} strokeWidth={1.8} aria-hidden="true" />
+                  <span className="home-hero__active-dot" aria-hidden />
                   <span>{plugin.title}</span>
                 </button>
                 <button
@@ -527,7 +528,7 @@ export const HomeHero = forwardRef<HTMLTextAreaElement, Props>(function HomeHero
                   disabled={!activePluginRecord}
                   title={activePluginRecord ? t('homeHero.pluginTitle', { title: activePluginRecord.title }) : undefined}
                 >
-                  <Plug className="home-hero__active-type-icon" size={13} strokeWidth={1.8} aria-hidden="true" />
+                  <span className="home-hero__active-dot" aria-hidden />
                   <span>{activePluginTitle}</span>
                 </button>
                 <button
@@ -857,33 +858,23 @@ export const HomeHero = forwardRef<HTMLTextAreaElement, Props>(function HomeHero
               title={t('chat.attachAria')}
               aria-label={t('chat.attachAria')}
             >
-              <Icon name="attach" size={15} />
+              <Icon name="attach" size={18} />
             </button>
-            {onChangeWorkingDir && onChangeDesignSystemId ? (
-              <HomeHeroSettingsChips
-                workingDir={workingDir}
-                onChangeWorkingDir={onChangeWorkingDir}
-                designSystems={designSystems}
-                designSystemsLoading={designSystemsLoading}
-                selectedDesignSystemId={selectedDesignSystemId}
-                onChangeDesignSystemId={onChangeDesignSystemId}
-                variant="inline"
-              />
-            ) : null}
+            <span className="home-hero__hint">
+              <kbd>↵</kbd> {t('homeHero.toRun')} · <kbd>Shift</kbd>+<kbd>↵</kbd> {t('homeHero.forNewLine')}
+            </span>
           </div>
-          <div className="home-hero__foot-right">
-            <button
-              type="button"
-              className="home-hero__submit"
-              data-testid="home-hero-submit"
-              onClick={onSubmit}
-              disabled={!canSubmit}
-              title={canSubmit ? t('homeHero.run') : t('homeHero.typeSomethingToRun')}
-              aria-label={t('homeHero.run')}
-            >
-              <Icon name="arrow-up" size={17} />
-            </button>
-          </div>
+          <button
+            type="button"
+            className="home-hero__submit"
+            data-testid="home-hero-submit"
+            onClick={onSubmit}
+            disabled={!canSubmit}
+            title={canSubmit ? t('homeHero.run') : t('homeHero.typeSomethingToRun')}
+            aria-label={t('homeHero.run')}
+          >
+            <Icon name="arrow-up" size={22} />
+          </button>
         </div>
       </div>
 

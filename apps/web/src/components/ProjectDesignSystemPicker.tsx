@@ -1,7 +1,6 @@
 // Project-page design-system picker — small dropdown rendered in the
-// project chrome header next to the title. Mirrors the homepage
-// settings chip (`HomeHeroSettingsChips` > design system) but binds
-// to an existing project: changing the selection PATCHes
+// project chrome header next to the title. It binds to an existing
+// project: changing the selection PATCHes
 // `project.designSystemId` so the next chat run carries the new
 // design-system metadata into the agent's system prompt (the daemon
 // already threads `designSystemId` from project state through

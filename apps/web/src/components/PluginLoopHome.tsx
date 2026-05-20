@@ -40,18 +40,6 @@ export interface PluginLoopSubmit {
   // Files staged on Home before the project exists. App uploads them
   // into the created project's Design Files before the first auto-send.
   attachments?: File[];
-  // Stage 1 of the home settings strip: the design system the user
-  // picked on the home composer chip. Null preserves the previous
-  // behaviour (no system stamped on create). EntryShell threads this
-  // through to onCreateProject's `designSystemId` field.
-  designSystemId?: string | null;
-  // Stage 2 of the home settings strip: the parent directory the user
-  // wants the project's design files to live in. Recorded on the
-  // project metadata as `userWorkingDir` so the agent + future
-  // automation can route writes correctly. The daemon's file write
-  // path still uses .od/projects/<id>/ today; honouring this hint
-  // end-to-end is a follow-up.
-  workingDir?: string | null;
 }
 
 interface Props {

@@ -458,106 +458,6 @@ export async function pickAndImportFolder(
   return { ok: true, response: body };
 }
 
-/**
- * Pure helper for the `dialog:pick-and-replace-working-dir` IPC handler.
- * Mirrors `pickAndImportFolder` (PR #974) but targets the
- * `POST /api/projects/:id/working-dir` endpoint, which re-points an
- * existing project at a new local folder. Same security contract:
- *   - HMAC token bound to the trimmed picker output.
- *   - Single lazy retry on `503 DESKTOP_AUTH_PENDING` after a fresh
- *     `registerDesktopAuth()` call.
- *   - All other failures (4xx, 5xx, network) return a structured failure
- *     so the renderer toast surfaces the daemon's reason.
- */
-export type PickAndReplaceWorkingDirDeps = {
-  apiBaseUrl: string;
-  baseDir: string;
-  desktopAuthSecret: Buffer;
-  fetchImpl?: typeof globalThis.fetch;
-  /** Injected for tests; defaults to the production HMAC mint. */
-  mintToken?: (secret: Buffer, baseDir: string) => string;
-  projectId: string;
-  registerDesktopAuth?: () => Promise<boolean>;
-};
-
-export type PickAndReplaceWorkingDirResult =
-  | { ok: true; response: unknown }
-  | { ok: false; canceled?: boolean; details?: unknown; reason?: string };
-
-export async function pickAndReplaceWorkingDir(
-  deps: PickAndReplaceWorkingDirDeps,
-): Promise<PickAndReplaceWorkingDirResult> {
-  const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
-  const mint = deps.mintToken ?? mintImportToken;
-  if (typeof deps.projectId !== "string" || deps.projectId.length === 0) {
-    return { ok: false, reason: "project id must be a non-empty string" };
-  }
-  if (!/^[A-Za-z0-9._-]{1,128}$/.test(deps.projectId)) {
-    return { ok: false, reason: "project id contains disallowed characters" };
-  }
-  const workingDirUrl = `${deps.apiBaseUrl.replace(/\/+$/, "")}/api/projects/${encodeURIComponent(deps.projectId)}/working-dir`;
-  const requestBody = JSON.stringify({ baseDir: deps.baseDir });
-
-  async function postOnce(): Promise<Response | { ok: false; reason: string }> {
-    const token = mint(deps.desktopAuthSecret, deps.baseDir);
-    try {
-      return await fetchImpl(workingDirUrl, {
-        body: requestBody,
-        headers: {
-          "Content-Type": "application/json",
-          [DESKTOP_IMPORT_TOKEN_HEADER]: token,
-        },
-        method: "POST",
-      });
-    } catch (err) {
-      return { ok: false, reason: `daemon fetch failed: ${err instanceof Error ? err.message : String(err)}` };
-    }
-  }
-
-  let resp = await postOnce();
-  if ("reason" in resp) {
-    return { ok: false, reason: resp.reason };
-  }
-
-  if (resp.status === 503 && deps.registerDesktopAuth != null) {
-    let body: unknown;
-    try {
-      body = await resp.clone().json();
-    } catch {
-      body = null;
-    }
-    const code =
-      body != null && typeof body === "object" && "error" in body && body.error != null && typeof body.error === "object" && "code" in body.error
-        ? (body.error as { code?: unknown }).code
-        : undefined;
-    if (code === "DESKTOP_AUTH_PENDING") {
-      const reregistered = await deps.registerDesktopAuth();
-      if (reregistered) {
-        const retry = await postOnce();
-        if ("reason" in retry) {
-          return { ok: false, reason: retry.reason };
-        }
-        resp = retry;
-      }
-    }
-  }
-
-  let body: unknown;
-  try {
-    body = await resp.json();
-  } catch {
-    body = null;
-  }
-  if (!resp.ok) {
-    return {
-      ok: false,
-      reason: `daemon returned HTTP ${resp.status}`,
-      ...(body == null ? {} : { details: body }),
-    };
-  }
-  return { ok: true, response: body };
-}
-
 const MAC_WINDOW_CHROME =
   process.platform === "darwin"
     ? ({
@@ -941,7 +841,6 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
   // hot-reload). removeHandler is a no-op when nothing is registered.
   ipcMain.removeHandler("dialog:pick-folder");
   ipcMain.removeHandler("dialog:pick-and-import");
-  ipcMain.removeHandler("dialog:pick-and-replace-working-dir");
   ipcMain.removeHandler("shell:open-external");
   ipcMain.removeHandler("shell:open-path");
   for (const channel of UPDATER_IPC_CHANNELS) {
@@ -1015,48 +914,6 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
         baseDir,
         desktopAuthSecret: options.desktopAuthSecret,
         init,
-        registerDesktopAuth: options.registerDesktopAuthWithDaemon,
-      });
-    },
-  );
-  // Atomic counterpart to dialog:pick-and-import for the "清空并替换目录"
-  // (replace working directory) gesture exposed by `WorkingDirPill`.
-  // Same trust boundary: picker + HMAC mint + POST are a single
-  // main-process transaction so a compromised renderer can't name an
-  // arbitrary baseDir and re-point an existing project at it. The
-  // daemon endpoint (`POST /api/projects/:id/working-dir`) refuses
-  // tokenless requests once any desktop has registered a secret;
-  // before this IPC existed, the renderer-driven flow would 403 in
-  // packaged builds.
-  ipcMain.handle(
-    "dialog:pick-and-replace-working-dir",
-    async (_event, init?: { projectId?: string }) => {
-      if (options.desktopAuthSecret == null) {
-        return { ok: false, reason: "desktop auth secret not registered" };
-      }
-      const projectId = typeof init?.projectId === "string" ? init.projectId : "";
-      if (projectId.length === 0) {
-        return { ok: false, reason: "project id is required" };
-      }
-      const apiBaseUrl =
-        (options.discoverDaemonUrl ? await options.discoverDaemonUrl() : null) ??
-        (await options.discoverUrl());
-      if (!apiBaseUrl) {
-        return { ok: false, reason: "daemon API URL not available" };
-      }
-      const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
-      if (result.canceled || result.filePaths.length === 0) {
-        return { ok: false, canceled: true };
-      }
-      const baseDir = result.filePaths[0].trim();
-      if (baseDir.length === 0) {
-        return { ok: false, reason: "picker returned an empty path" };
-      }
-      return await pickAndReplaceWorkingDir({
-        apiBaseUrl,
-        baseDir,
-        desktopAuthSecret: options.desktopAuthSecret,
-        projectId,
         registerDesktopAuth: options.registerDesktopAuthWithDaemon,
       });
     },
