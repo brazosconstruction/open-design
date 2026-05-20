@@ -20,6 +20,7 @@ import {
 
 import { startDaemonRuntime, type StartedDaemonRuntime } from "../daemon-startup.js";
 import { isDesktopAuthGateActive, setDesktopAuthSecret } from "../desktop-auth.js";
+import { prepareDaemonSidecarDevRuntime } from "./dev-runtime.js";
 
 /**
  * PR #974 round 6 (mrcfps): pure wrapper that overlays the live
@@ -74,6 +75,8 @@ function attachParentMonitor(stop: () => Promise<void>): void {
 }
 
 export async function startDaemonSidecar(runtime: SidecarRuntimeContext<SidecarStamp>): Promise<DaemonSidecarHandle> {
+  await prepareDaemonSidecarDevRuntime({ runtime });
+
   const serverHandle: StartedDaemonRuntime = await startDaemonRuntime({
     desktopPdfExporter: async (input: DesktopExportPdfInput): Promise<DesktopExportPdfResult> => {
       const desktopIpc = resolveAppIpcPath({

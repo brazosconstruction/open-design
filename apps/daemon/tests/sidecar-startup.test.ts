@@ -15,9 +15,13 @@ const startDaemonRuntime = vi.fn(async () => ({
   stop: stopRuntime,
   url: 'http://127.0.0.1:48123',
 }));
+const prepareDaemonSidecarDevRuntime = vi.fn(async () => null);
 
 vi.mock('../src/daemon-startup.js', () => ({
   startDaemonRuntime,
+}));
+vi.mock('../src/sidecar/dev-runtime.js', () => ({
+  prepareDaemonSidecarDevRuntime,
 }));
 
 describe('daemon sidecar startup', () => {
@@ -49,6 +53,12 @@ describe('daemon sidecar startup', () => {
       expect(startDaemonRuntime).toHaveBeenCalledWith(
         expect.objectContaining({ port: 0 }),
       );
+      expect(prepareDaemonSidecarDevRuntime).toHaveBeenCalledWith({
+        runtime: expect.objectContaining({
+          mode: SIDECAR_MODES.DEV,
+          source: SIDECAR_SOURCES.TOOLS_DEV,
+        }),
+      });
       const initial = await handle.status();
       expect(initial.state).toBe('running');
       expect(initial.url).toBe('http://127.0.0.1:48123');
