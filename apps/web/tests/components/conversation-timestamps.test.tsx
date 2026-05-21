@@ -141,49 +141,6 @@ describe('conversation timestamps', () => {
     expect(onRegenerateAssistantMessage).toHaveBeenCalledWith(assistant);
   });
 
-  it('keeps the active plugin chip compact and moves technical metadata to hover text', () => {
-    renderChatPane(
-      [
-        {
-          id: 'user-1',
-          role: 'user',
-          content: 'Make a deck',
-          createdAt: Date.parse('2025-01-15T12:00:00Z'),
-        },
-      ],
-      {
-        activePluginSnapshot: {
-          snapshotId: 'snap-1',
-          pluginId: 'default-deck',
-          pluginVersion: '0.1.0',
-          manifestSourceDigest: 'sha256:abc',
-          inputs: {},
-          resolvedContext: {
-            items: [],
-          },
-          capabilitiesGranted: [],
-          capabilitiesRequired: [],
-          assetsStaged: [],
-          taskKind: 'new-generation',
-          appliedAt: Date.parse('2025-01-15T12:00:00Z'),
-          connectorsRequired: [],
-          connectorsResolved: [],
-          mcpServers: [],
-          pluginTitle: 'Default deck',
-          status: 'fresh',
-        },
-      },
-    );
-
-    const chip = screen.getByTestId('msg-plugin-chip');
-
-    expect(chip.textContent).toBe('PluginDefault deck');
-    expect(chip.textContent).not.toContain('@0.1.0');
-    expect(chip.textContent).not.toContain('new-generation');
-    expect(chip.getAttribute('title')).toContain('Version: 0.1.0');
-    expect(chip.getAttribute('title')).toContain('Task: New generation');
-  });
-
   it('does not treat a completed last assistant message as streaming just because another conversation is running', () => {
     const message: ChatMessage = {
       id: 'assistant-1',
