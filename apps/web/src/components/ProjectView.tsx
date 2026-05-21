@@ -3597,9 +3597,14 @@ export function ProjectView({
               return (
                 <button
                   type="button"
-                  className={`project-instructions-chip${instructionsMode !== 'closed' ? ' is-open' : ''}`}
+                  className={
+                    hasProjectInstructions
+                      ? `project-instructions-chip${instructionsMode !== 'closed' ? ' is-open' : ''}`
+                      : `project-title-icon-button${instructionsMode !== 'closed' ? ' is-open' : ''}`
+                  }
                   data-testid={hasProjectInstructions ? 'project-instructions-chip' : 'project-instructions-add'}
                   title={t('project.customInstructions')}
+                  aria-label={t('project.customInstructions')}
                   aria-expanded={instructionsMode !== 'closed'}
                   onClick={() => {
                     if (hasProjectInstructions) {
@@ -3610,14 +3615,14 @@ export function ProjectView({
                     setInstructionsMode((m) => (m === 'closed' ? 'edit' : 'closed'));
                   }}
                 >
-                  <Icon name={hasProjectInstructions ? 'file' : 'plus'} size={11} />
-                  <span>{t('project.customInstructions')}</span>
+                  <Icon name="file" size={hasProjectInstructions ? 11 : 13} />
+                  {hasProjectInstructions ? <span>{t('project.customInstructions')}</span> : null}
                 </button>
               );
             })()}
             <button
               type="button"
-              className="project-link-folder-chip"
+              className="project-title-icon-button"
               data-testid="project-link-folder"
               title={t('chat.importFolder')}
               aria-label={t('chat.importFolder')}
@@ -3625,8 +3630,7 @@ export function ProjectView({
                 void handleLinkFolder();
               }}
             >
-              <Icon name="plus" size={11} />
-              <span>{t('chat.importFolder')}</span>
+              <Icon name="folder" size={13} />
             </button>
             {linkedDirs.length > 0 ? (
               <span className="project-linked-dirs" data-testid="project-linked-dirs">

@@ -222,6 +222,8 @@ describe('ProjectView – saved Project instructions surface (#1822)', () => {
 
     const add = await screen.findByTestId('project-instructions-add');
     expect(screen.queryByTestId('project-instructions-chip')).toBeNull();
+    expect(add.textContent).toBe('');
+    expect(screen.getByTestId('project-link-folder').textContent).toBe('');
 
     fireEvent.click(add);
 

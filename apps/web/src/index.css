@@ -1330,6 +1330,27 @@ code {
   color: var(--text);
   border-color: var(--accent, #646cff);
 }
+.project-title-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  flex: 0 0 auto;
+}
+.project-title-icon-button:hover,
+.project-title-icon-button.is-open {
+  color: var(--text);
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
 .project-link-folder-chip {
   display: inline-flex;
   align-items: center;
