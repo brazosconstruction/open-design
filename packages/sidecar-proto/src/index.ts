@@ -89,6 +89,11 @@ export const SIDECAR_EVENTS = Object.freeze({
   INSPECT_SCREENSHOT: "inspect.screenshot",
   INSPECT_STATUS: "inspect.status",
   INSPECT_UPDATE: "inspect.update",
+  PACKAGED_BUNDLE_ACTIVATE: "packaged.bundle.activate",
+  PACKAGED_BUNDLE_ENSURE: "packaged.bundle.ensure",
+  PACKAGED_BUNDLE_RESTART: "packaged.bundle.restart",
+  PACKAGED_BUNDLE_STATUS: "packaged.bundle.status",
+  PACKAGED_BUNDLE_SWITCH: "packaged.bundle.switch",
 } as const);
 
 export type SidecarEventKey = (typeof SIDECAR_EVENTS)[keyof typeof SIDECAR_EVENTS];
@@ -365,6 +370,78 @@ export type DesktopUpdateInput = {
 
 export type DesktopUpdateResult = DesktopUpdateStatusSnapshot;
 
+export const PACKAGED_BUNDLE_KEYS = Object.freeze({
+  WEB: "od:sidecar:web",
+} as const);
+
+export type PackagedBundleOperation =
+  | "activate"
+  | "ensure"
+  | "restart"
+  | "status"
+  | "switch";
+
+export type PackagedBundleTargetInput = {
+  key: string;
+};
+
+export type PackagedBundleActivationInput =
+  | {
+      key: string;
+      source: "builtin";
+    }
+  | {
+      key: string;
+      source?: "bundle";
+      version: string;
+    };
+
+export type PackagedBundleRuntimeState = ServiceRuntimeState | "switching" | "unavailable";
+export type PackagedBundleRuntimeSource = "builtin" | "bundle" | "missing" | "unavailable";
+
+export type PackagedBundleRuntimeSnapshot = {
+  activationPath?: string;
+  bundleBasePath?: string;
+  fallbackReason?: string;
+  implementation?: SidecarImplementationSnapshot;
+  key: string;
+  operation?: PackagedBundleOperation | null;
+  pid?: number | null;
+  source: PackagedBundleRuntimeSource;
+  state: PackagedBundleRuntimeState;
+  updatedAt?: string;
+  url: string | null;
+  version?: string;
+};
+
+export type PackagedBundleActivationSnapshot =
+  | {
+      key: string;
+      path: string;
+      source: "builtin";
+    }
+  | {
+      key: string;
+      path: string;
+      source: "bundle";
+      version: string;
+    }
+  | {
+      error?: string;
+      key: string;
+      path: string;
+      source: "missing" | "invalid";
+    };
+
+export type PackagedBundleOperationResult = {
+  accepted: true;
+  activation?: PackagedBundleActivationSnapshot;
+  mode: "online";
+  operation: PackagedBundleOperation;
+  previous?: PackagedBundleRuntimeSnapshot;
+  runtime: PackagedBundleRuntimeSnapshot;
+};
+
 export type SidecarStatusMessage = { type: typeof SIDECAR_MESSAGES.STATUS };
 export type SidecarShutdownMessage = { type: typeof SIDECAR_MESSAGES.SHUTDOWN };
 export type SidecarInspectStatusEventMessage = {
@@ -402,6 +479,31 @@ export type SidecarDesktopExportPdfEventMessage = {
   payload: DesktopExportPdfInput;
   type: typeof SIDECAR_MESSAGES.EVENT;
 };
+export type SidecarPackagedBundleStatusEventMessage = {
+  key: typeof SIDECAR_EVENTS.PACKAGED_BUNDLE_STATUS;
+  payload: PackagedBundleTargetInput;
+  type: typeof SIDECAR_MESSAGES.EVENT;
+};
+export type SidecarPackagedBundleEnsureEventMessage = {
+  key: typeof SIDECAR_EVENTS.PACKAGED_BUNDLE_ENSURE;
+  payload: PackagedBundleTargetInput;
+  type: typeof SIDECAR_MESSAGES.EVENT;
+};
+export type SidecarPackagedBundleRestartEventMessage = {
+  key: typeof SIDECAR_EVENTS.PACKAGED_BUNDLE_RESTART;
+  payload: PackagedBundleTargetInput;
+  type: typeof SIDECAR_MESSAGES.EVENT;
+};
+export type SidecarPackagedBundleSwitchEventMessage = {
+  key: typeof SIDECAR_EVENTS.PACKAGED_BUNDLE_SWITCH;
+  payload: PackagedBundleActivationInput;
+  type: typeof SIDECAR_MESSAGES.EVENT;
+};
+export type SidecarPackagedBundleActivateEventMessage = {
+  key: typeof SIDECAR_EVENTS.PACKAGED_BUNDLE_ACTIVATE;
+  payload: PackagedBundleActivationInput;
+  type: typeof SIDECAR_MESSAGES.EVENT;
+};
 export type SidecarEventMessage =
   | SidecarInspectStatusEventMessage
   | SidecarInspectEvalEventMessage
@@ -409,7 +511,12 @@ export type SidecarEventMessage =
   | SidecarInspectConsoleEventMessage
   | SidecarInspectClickEventMessage
   | SidecarInspectUpdateEventMessage
-  | SidecarDesktopExportPdfEventMessage;
+  | SidecarDesktopExportPdfEventMessage
+  | SidecarPackagedBundleStatusEventMessage
+  | SidecarPackagedBundleEnsureEventMessage
+  | SidecarPackagedBundleRestartEventMessage
+  | SidecarPackagedBundleSwitchEventMessage
+  | SidecarPackagedBundleActivateEventMessage;
 export type DesktopEvalMessage = { input: DesktopEvalInput; type: typeof SIDECAR_MESSAGES.EVAL };
 export type DesktopScreenshotMessage = { input: DesktopScreenshotInput; type: typeof SIDECAR_MESSAGES.SCREENSHOT };
 export type DesktopConsoleMessage = { type: typeof SIDECAR_MESSAGES.CONSOLE };
@@ -667,6 +774,31 @@ function normalizeDesktopUpdateInput(input: unknown): DesktopUpdateInput {
   return { action: value.action };
 }
 
+function normalizePackagedBundleTargetInput(input: unknown, label: string): PackagedBundleTargetInput {
+  const value = assertObject(input, label);
+  assertKnownKeys(value, ["key"], label);
+  return { key: normalizeNonEmptyString(value.key, `${label} key`) };
+}
+
+function normalizePackagedBundleActivationInput(input: unknown, label: string): PackagedBundleActivationInput {
+  const value = assertObject(input, label);
+  assertKnownKeys(value, ["key", "source", "version"], label);
+  const key = normalizeNonEmptyString(value.key, `${label} key`);
+  if (value.source === "builtin") {
+    if (value.version != null) throw new Error(`${label} must not include version when source is builtin`);
+    return { key, source: "builtin" };
+  }
+
+  if (value.source != null && value.source !== "bundle") {
+    throw new Error(`${label} source must be builtin or bundle`);
+  }
+  return {
+    key,
+    ...(value.source === "bundle" ? { source: "bundle" as const } : {}),
+    version: normalizeNonEmptyString(value.version, `${label} version`),
+  };
+}
+
 function normalizeOptionalEmptyPayload(input: unknown, label: string): Record<string, never> | undefined {
   if (input == null) return undefined;
   const value = assertObject(input, label);
@@ -702,6 +834,36 @@ function normalizeSidecarEventMessage(input: unknown, label: string): SidecarEve
       return { key, payload: normalizeDesktopUpdateInput(value.payload), type: SIDECAR_MESSAGES.EVENT };
     case SIDECAR_EVENTS.DESKTOP_EXPORT_PDF:
       return { key, payload: normalizeDesktopExportPdfInput(value.payload), type: SIDECAR_MESSAGES.EVENT };
+    case SIDECAR_EVENTS.PACKAGED_BUNDLE_STATUS:
+      return {
+        key,
+        payload: normalizePackagedBundleTargetInput(value.payload, `${label} payload`),
+        type: SIDECAR_MESSAGES.EVENT,
+      };
+    case SIDECAR_EVENTS.PACKAGED_BUNDLE_ENSURE:
+      return {
+        key,
+        payload: normalizePackagedBundleTargetInput(value.payload, `${label} payload`),
+        type: SIDECAR_MESSAGES.EVENT,
+      };
+    case SIDECAR_EVENTS.PACKAGED_BUNDLE_RESTART:
+      return {
+        key,
+        payload: normalizePackagedBundleTargetInput(value.payload, `${label} payload`),
+        type: SIDECAR_MESSAGES.EVENT,
+      };
+    case SIDECAR_EVENTS.PACKAGED_BUNDLE_SWITCH:
+      return {
+        key,
+        payload: normalizePackagedBundleActivationInput(value.payload, `${label} payload`),
+        type: SIDECAR_MESSAGES.EVENT,
+      };
+    case SIDECAR_EVENTS.PACKAGED_BUNDLE_ACTIVATE:
+      return {
+        key,
+        payload: normalizePackagedBundleActivationInput(value.payload, `${label} payload`),
+        type: SIDECAR_MESSAGES.EVENT,
+      };
     default:
       throw new SidecarContractError(SIDECAR_ERROR_CODES.UNKNOWN_MESSAGE, `unknown sidecar event: ${key}`);
   }

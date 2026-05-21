@@ -3,9 +3,13 @@ import type { CAC } from "cac";
 
 import { resolveToolPackConfig, type ToolPackCliOptions, type ToolPackPlatform } from "./config.js";
 import {
+  activatePackagedWebBundleOnline,
   activatePackagedBuiltinWebBundle,
   activatePackagedWebBundle,
-  readPackagedWebBundleActivation,
+  ensurePackagedWebBundle,
+  readPackagedWebBundleStatus,
+  restartPackagedWebBundle,
+  switchPackagedWebBundle,
 } from "./bundles.js";
 import {
   cleanupPackedMacNamespace,
@@ -47,6 +51,8 @@ import {
 
 type CliOptions = ToolPackCliOptions;
 type BundleCliOptions = CliOptions & {
+  builtin?: boolean;
+  online?: boolean;
   platform?: string;
   version?: string;
 };
@@ -65,6 +71,16 @@ function printLogs(result: { logs: Record<string, { lines: string[]; logPath: st
     process.stdout.write(`[${app}] ${entry.logPath}\n`);
     process.stdout.write(entry.lines.length > 0 ? `${entry.lines.join("\n")}\n` : "(no log lines)\n");
   }
+}
+
+function printCliError(action: string, error: unknown, options: CliOptions): void {
+  const message = error instanceof Error ? error.message : String(error);
+  if (options.json === true) {
+    printJson({ ok: false, action, error: message });
+  } else {
+    process.stderr.write(`tools-pack ${action} failed: ${message}\n`);
+  }
+  process.exitCode = 1;
 }
 
 type CacCommand = ReturnType<CAC["command"]>;
@@ -250,30 +266,60 @@ addBuildOptions(addSharedOptions(cli.command("linux <action>", "Linux packaging 
     }
   });
 
-cli.command("bundle <action>", "Packaged web bundle activation commands: activate|builtin|status")
+cli.command("bundle <action>", "Packaged web bundle commands: activate|builtin|status|ensure|restart|switch")
   .option("--cache-dir <path>", "tools-pack cache directory")
   .option("--dir <path>", "tools-pack root directory")
   .option("--json", "print JSON")
   .option("--namespace <name>", "runtime namespace")
   .option("--platform <platform>", "packaged runtime platform: mac|win|linux (default: current host)")
-  .option("--version <version>", "web bundle version <epoch>.web.M for activate")
+  .option("--builtin", "target the built-in packaged web runtime")
+  .option("--online", "send activation/builtin through the running packaged IPC instead of writing the offline pointer")
+  .option("--version <version>", "web bundle version <epoch>.web.M")
   .action(async (action: string, options: BundleCliOptions) => {
-    const config = resolveToolPackConfig(resolveBundlePlatform(options.platform), options);
-    switch (action) {
-      case "activate":
-        if (options.version == null || options.version.length === 0) {
-          throw new Error("tools-pack bundle activate requires --version <epoch>.web.M");
-        }
-        printJson(await activatePackagedWebBundle(config, options.version));
-        return;
-      case "builtin":
-        printJson(await activatePackagedBuiltinWebBundle(config));
-        return;
-      case "status":
-        printJson(await readPackagedWebBundleActivation(config));
-        return;
-      default:
-        throw new Error(`unsupported bundle action: ${action}`);
+    try {
+      const config = resolveToolPackConfig(resolveBundlePlatform(options.platform), options);
+      switch (action) {
+        case "activate":
+          if (options.version == null || options.version.length === 0) {
+            throw new Error("tools-pack bundle activate requires --version <epoch>.web.M");
+          }
+          if (options.online === true) {
+            printJson(await activatePackagedWebBundleOnline(config, { version: options.version }));
+            return;
+          }
+          printJson(await activatePackagedWebBundle(config, options.version));
+          return;
+        case "builtin":
+          if (options.online === true) {
+            printJson(await activatePackagedWebBundleOnline(config, "builtin"));
+            return;
+          }
+          printJson(await activatePackagedBuiltinWebBundle(config));
+          return;
+        case "ensure":
+          printJson(await ensurePackagedWebBundle(config));
+          return;
+        case "restart":
+          printJson(await restartPackagedWebBundle(config));
+          return;
+        case "status":
+          printJson(await readPackagedWebBundleStatus(config));
+          return;
+        case "switch":
+          if (options.builtin === true) {
+            printJson(await switchPackagedWebBundle(config, "builtin"));
+            return;
+          }
+          if (options.version == null || options.version.length === 0) {
+            throw new Error("tools-pack bundle switch requires --version <epoch>.web.M or --builtin");
+          }
+          printJson(await switchPackagedWebBundle(config, { version: options.version }));
+          return;
+        default:
+          throw new Error(`unsupported bundle action: ${action}`);
+      }
+    } catch (error) {
+      printCliError(`bundle ${action}`, error, options);
     }
   });
 

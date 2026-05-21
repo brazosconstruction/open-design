@@ -2,6 +2,15 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { parseBundleEpochVersion, validateBundleRef } from "@open-design/bundle";
+import {
+  APP_KEYS,
+  OPEN_DESIGN_SIDECAR_CONTRACT,
+  SIDECAR_EVENTS,
+  SIDECAR_MESSAGES,
+  type PackagedBundleActivationInput,
+  type PackagedBundleOperationResult,
+} from "@open-design/sidecar-proto";
+import { requestJsonIpc, resolveAppIpcPath } from "@open-design/sidecar";
 
 import type { ToolPackConfig } from "./config.js";
 
@@ -17,6 +26,13 @@ export type PackagedWebBundleActivationResult = {
   source: "builtin" | "bundle" | "missing";
   version?: string;
 };
+
+export type PackagedWebBundleStatusResult =
+  | PackagedBundleOperationResult
+  | (PackagedWebBundleActivationResult & {
+      mode: "offline";
+      onlineError?: string;
+    });
 
 function activationPath(config: ToolPackConfig): string {
   return join(config.roots.runtime.namespaceRoot, "data", "bundle-activation.json");
@@ -42,6 +58,45 @@ function validateWebBundleVersion(version: string): string {
     throw new Error(`web bundle activation version must use .${TOOLS_PACK_WEB_BUNDLE_SLUG}.M: ${version}`);
   }
   return validateBundleRef({ key: TOOLS_PACK_WEB_BUNDLE_KEY, version: parsed.version }).version;
+}
+
+function desktopIpcPath(config: ToolPackConfig): string {
+  return resolveAppIpcPath({
+    app: APP_KEYS.DESKTOP,
+    contract: OPEN_DESIGN_SIDECAR_CONTRACT,
+    namespace: config.namespace,
+  });
+}
+
+function onlineErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function requestPackagedWebBundleOperation(
+  config: ToolPackConfig,
+  key: typeof SIDECAR_EVENTS.PACKAGED_BUNDLE_ACTIVATE
+    | typeof SIDECAR_EVENTS.PACKAGED_BUNDLE_ENSURE
+    | typeof SIDECAR_EVENTS.PACKAGED_BUNDLE_RESTART
+    | typeof SIDECAR_EVENTS.PACKAGED_BUNDLE_STATUS
+    | typeof SIDECAR_EVENTS.PACKAGED_BUNDLE_SWITCH,
+  payload: PackagedBundleActivationInput | { key: typeof TOOLS_PACK_WEB_BUNDLE_KEY },
+  timeoutMs: number,
+): Promise<PackagedBundleOperationResult> {
+  return await requestJsonIpc<PackagedBundleOperationResult>(
+    desktopIpcPath(config),
+    {
+      key,
+      payload,
+      type: SIDECAR_MESSAGES.EVENT,
+    },
+    { timeoutMs },
+  );
+}
+
+function webBundleActivationInput(input: "builtin" | { version: string }): PackagedBundleActivationInput {
+  return input === "builtin"
+    ? { key: TOOLS_PACK_WEB_BUNDLE_KEY, source: "builtin" }
+    : { key: TOOLS_PACK_WEB_BUNDLE_KEY, version: validateWebBundleVersion(input.version) };
 }
 
 export async function activatePackagedWebBundle(
@@ -107,4 +162,69 @@ export async function readPackagedWebBundleActivation(
     }
     throw error;
   }
+}
+
+export async function readPackagedWebBundleStatus(
+  config: ToolPackConfig,
+): Promise<PackagedWebBundleStatusResult> {
+  try {
+    return await requestPackagedWebBundleOperation(
+      config,
+      SIDECAR_EVENTS.PACKAGED_BUNDLE_STATUS,
+      { key: TOOLS_PACK_WEB_BUNDLE_KEY },
+      1500,
+    );
+  } catch (error) {
+    return {
+      ...(await readPackagedWebBundleActivation(config)),
+      mode: "offline",
+      onlineError: onlineErrorMessage(error),
+    };
+  }
+}
+
+export async function ensurePackagedWebBundle(
+  config: ToolPackConfig,
+): Promise<PackagedBundleOperationResult> {
+  return await requestPackagedWebBundleOperation(
+    config,
+    SIDECAR_EVENTS.PACKAGED_BUNDLE_ENSURE,
+    { key: TOOLS_PACK_WEB_BUNDLE_KEY },
+    90_000,
+  );
+}
+
+export async function restartPackagedWebBundle(
+  config: ToolPackConfig,
+): Promise<PackagedBundleOperationResult> {
+  return await requestPackagedWebBundleOperation(
+    config,
+    SIDECAR_EVENTS.PACKAGED_BUNDLE_RESTART,
+    { key: TOOLS_PACK_WEB_BUNDLE_KEY },
+    90_000,
+  );
+}
+
+export async function switchPackagedWebBundle(
+  config: ToolPackConfig,
+  input: "builtin" | { version: string },
+): Promise<PackagedBundleOperationResult> {
+  return await requestPackagedWebBundleOperation(
+    config,
+    SIDECAR_EVENTS.PACKAGED_BUNDLE_SWITCH,
+    webBundleActivationInput(input),
+    120_000,
+  );
+}
+
+export async function activatePackagedWebBundleOnline(
+  config: ToolPackConfig,
+  input: "builtin" | { version: string },
+): Promise<PackagedBundleOperationResult> {
+  return await requestPackagedWebBundleOperation(
+    config,
+    SIDECAR_EVENTS.PACKAGED_BUNDLE_ACTIVATE,
+    webBundleActivationInput(input),
+    30_000,
+  );
 }

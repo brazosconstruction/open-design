@@ -3,6 +3,13 @@ import { protocol } from "electron";
 const OD_SCHEME = "od";
 const OD_ENTRY_URL = `${OD_SCHEME}://app/`;
 
+export type OdRuntimeTarget = {
+  unavailableReason?: string;
+  url: string | null;
+};
+
+export type OdRuntimeTargetResolver = () => OdRuntimeTarget;
+
 protocol.registerSchemesAsPrivileged([
   {
     privileges: {
@@ -45,6 +52,19 @@ function buildProxyErrorResponse(error: unknown, target: string): Response {
   );
 }
 
+function buildUnavailableResponse(target: OdRuntimeTarget): Response {
+  return new Response(
+    JSON.stringify({
+      error: "OD_PROTOCOL_WEB_UNAVAILABLE",
+      reason: target.unavailableReason ?? "web-unavailable",
+    }),
+    {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    },
+  );
+}
+
 /**
  * Inner request handler for the `od://` Electron protocol — every
  * renderer fetch flows through here and gets proxied to the local web
@@ -65,10 +85,13 @@ function buildProxyErrorResponse(error: unknown, target: string): Response {
  */
 export async function handleOdRequest(
   request: Request,
-  webRuntimeUrl: string,
+  resolveWebRuntimeTarget: OdRuntimeTargetResolver,
   fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
-  const target = toWebRuntimeUrl(webRuntimeUrl, request.url);
+  const webRuntimeTarget = resolveWebRuntimeTarget();
+  if (webRuntimeTarget.url == null) return buildUnavailableResponse(webRuntimeTarget);
+
+  const target = toWebRuntimeUrl(webRuntimeTarget.url, request.url);
   try {
     return await fetchImpl(new Request(target, request));
   } catch (error) {
@@ -80,8 +103,8 @@ export function packagedEntryUrl(): string {
   return OD_ENTRY_URL;
 }
 
-export function registerOdProtocol(webRuntimeUrl: string): void {
+export function registerOdProtocol(resolveWebRuntimeTarget: OdRuntimeTargetResolver): void {
   protocol.handle(OD_SCHEME, async (request) => {
-    return await handleOdRequest(request, webRuntimeUrl);
+    return await handleOdRequest(request, resolveWebRuntimeTarget);
   });
 }

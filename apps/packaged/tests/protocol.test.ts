@@ -45,7 +45,7 @@ describe('od:// protocol proxy', () => {
     };
 
     const request = new Request('od://app/api/codex-pets/sync', { method: 'POST' });
-    const response = await handleOdRequest(request, 'http://127.0.0.1:17579/', fetchImpl);
+    const response = await handleOdRequest(request, () => ({ url: 'http://127.0.0.1:17579/' }), fetchImpl);
 
     expect(response.status).toBe(200);
     expect(captured).toHaveLength(1);
@@ -61,7 +61,7 @@ describe('od:// protocol proxy', () => {
     };
 
     const request = new Request('od://app/api/projects?limit=5#section', { method: 'GET' });
-    await handleOdRequest(request, 'http://127.0.0.1:42424/', fetchImpl);
+    await handleOdRequest(request, () => ({ url: 'http://127.0.0.1:42424/' }), fetchImpl);
 
     const target = new URL(captured[0]!.url);
     expect(target.host).toBe('127.0.0.1:42424');
@@ -88,7 +88,7 @@ describe('od:// protocol proxy', () => {
     };
 
     const request = new Request('od://app/api/codex-pets/sync', { method: 'POST' });
-    const response = await handleOdRequest(request, 'http://127.0.0.1:17579/', fetchImpl);
+    const response = await handleOdRequest(request, () => ({ url: 'http://127.0.0.1:17579/' }), fetchImpl);
 
     expect(response.status).toBe(502);
     const body = (await response.json()) as {
@@ -110,7 +110,7 @@ describe('od:// protocol proxy', () => {
 
     // The promise must resolve with a Response, never reject.
     await expect(
-      handleOdRequest(new Request('od://app/'), 'http://127.0.0.1:1/', fetchImpl),
+      handleOdRequest(new Request('od://app/'), () => ({ url: 'http://127.0.0.1:1/' }), fetchImpl),
     ).resolves.toBeInstanceOf(Response);
   });
 
@@ -122,11 +122,46 @@ describe('od:// protocol proxy', () => {
 
     const response = await handleOdRequest(
       new Request('od://app/api/probe'),
-      'http://127.0.0.1:1/',
+      () => ({ url: 'http://127.0.0.1:1/' }),
       fetchImpl,
     );
     expect(response.status).toBe(502);
     const body = (await response.json()) as { message: string };
     expect(body.message).toBe('sync timeout');
+  });
+
+  it('uses the current runtime target for each request', async () => {
+    const captured: string[] = [];
+    let url = 'http://127.0.0.1:10001/';
+    const fetchImpl: typeof fetch = async (input) => {
+      captured.push((input as Request).url);
+      return new Response('ok');
+    };
+
+    await handleOdRequest(new Request('od://app/first'), () => ({ url }), fetchImpl);
+    url = 'http://127.0.0.1:10002/';
+    await handleOdRequest(new Request('od://app/second'), () => ({ url }), fetchImpl);
+
+    expect(captured).toEqual([
+      'http://127.0.0.1:10001/first',
+      'http://127.0.0.1:10002/second',
+    ]);
+  });
+
+  it('returns 503 while the web runtime target is unavailable', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    const response = await handleOdRequest(
+      new Request('od://app/api/projects'),
+      () => ({ unavailableReason: 'web-switching', url: null }),
+      fetchImpl,
+    );
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: 'OD_PROTOCOL_WEB_UNAVAILABLE',
+      reason: 'web-switching',
+    });
   });
 });

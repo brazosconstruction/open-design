@@ -8,10 +8,17 @@ import {
   APP_KEYS,
   OPEN_DESIGN_SIDECAR_CONTRACT,
   SIDECAR_ENV,
+  SIDECAR_EVENTS,
   SIDECAR_MESSAGES,
   SIDECAR_MODES,
   type AppKey,
   type DaemonStatusSnapshot,
+  type PackagedBundleActivationInput,
+  type PackagedBundleActivationSnapshot,
+  type PackagedBundleOperation,
+  type PackagedBundleOperationResult,
+  type PackagedBundleRuntimeSnapshot,
+  type SidecarEventMessage,
   type SidecarStamp,
   type WebStatusSnapshot,
 } from "@open-design/sidecar-proto";
@@ -29,8 +36,14 @@ import {
 } from "@open-design/platform";
 
 import {
+  PACKAGED_WEB_SIDECAR_BUNDLE_KEY,
+  createPackagedBundleActivationFile,
+  readPackagedBundleActivationFile,
   resolvePackagedWebSidecarImplementation,
+  resolvePackagedWebSidecarImplementationForActivation,
   sidecarImplementationEnv,
+  writePackagedBundleActivationFile,
+  type PackagedBundleActivationFile,
   type PackagedWebSidecarImplementation,
 } from "./bundle-activation.js";
 import type { PackagedWebOutputMode } from "./config.js";
@@ -62,10 +75,40 @@ function shouldForwardPackagedChildEnv(key: string, includeProviderSecrets = fal
 export type PackagedSidecarHandle = {
   close(): Promise<void>;
   daemon: DaemonStatusSnapshot;
+  handleBundleEvent(message: SidecarEventMessage): Promise<PackagedBundleOperationResult | undefined>;
   implementations: {
     web: PackagedWebSidecarImplementation["implementation"];
   };
   web: WebStatusSnapshot;
+  webRuntimeTarget(): {
+    unavailableReason?: string;
+    url: string | null;
+  };
+};
+
+export type StartPackagedSidecarsOptions = {
+  appVersion: string | null;
+  bundleEpoch: string | null;
+  daemonCliEntry: string | null;
+  daemonSidecarEntry: string | null;
+  nodeCommand: string | null;
+  onWebStatusChange?: (status: WebStatusSnapshot) => Promise<void>;
+  telemetryRelayUrl: string | null;
+  posthogKey: string | null;
+  posthogHost: string | null;
+  /**
+   * PR #974 round-5 (lefarcen P2): caller asserts whether a desktop
+   * runtime is being started in this packaged process group. The
+   * Electron entry passes `true`; `headless.ts` passes `false` so the
+   * daemon's import-folder gate stays dormant in headless mode where
+   * there is no `shell.openPath` surface and no client to register a
+   * secret. Required (no default) so a future packaged caller cannot
+   * silently regress the gate by omitting it.
+   */
+  requireDesktopAuth: boolean;
+  webSidecarEntry: string | null;
+  webStandaloneRoot: string | null;
+  webOutputMode: PackagedWebOutputMode;
 };
 
 type ManagedSidecarChild = {
@@ -362,64 +405,120 @@ async function closeManagedChild(child: ManagedSidecarChild): Promise<void> {
   await child.logHandle.close().catch(() => undefined);
 }
 
-export async function startPackagedSidecars(
-  runtime: SidecarRuntimeContext<SidecarStamp>,
-  paths: PackagedNamespacePaths,
-  options: {
-    appVersion: string | null;
-    bundleEpoch: string | null;
-    daemonCliEntry: string | null;
-    daemonSidecarEntry: string | null;
-    nodeCommand: string | null;
-    telemetryRelayUrl: string | null;
-    posthogKey: string | null;
-    posthogHost: string | null;
-    /**
-     * PR #974 round-5 (lefarcen P2): caller asserts whether a desktop
-     * runtime is being started in this packaged process group. The
-     * Electron entry passes `true`; `headless.ts` passes `false` so the
-     * daemon's import-folder gate stays dormant in headless mode where
-     * there is no `shell.openPath` surface and no client to register a
-     * secret. Required (no default) so a future packaged caller cannot
-     * silently regress the gate by omitting it.
-     */
-    requireDesktopAuth: boolean;
-    webSidecarEntry: string | null;
-    webStandaloneRoot: string | null;
-    webOutputMode: PackagedWebOutputMode;
-  },
-): Promise<PackagedSidecarHandle> {
-  await mkdir(paths.namespaceRoot, { recursive: true });
-  await mkdir(paths.cacheRoot, { recursive: true });
-  await mkdir(paths.dataRoot, { recursive: true });
-  await mkdir(paths.bundleBasePath, { recursive: true });
-  await mkdir(paths.logsRoot, { recursive: true });
-  await mkdir(paths.desktopLogsRoot, { recursive: true });
-  await mkdir(paths.runtimeRoot, { recursive: true });
-  await mkdir(paths.updateRoot, { recursive: true });
-  await mkdir(paths.electronUserDataRoot, { recursive: true });
-  await mkdir(paths.electronSessionDataRoot, { recursive: true });
+class PackagedSidecarSupervisor implements PackagedSidecarHandle {
+  daemon: DaemonStatusSnapshot = {
+    desktopAuthGateActive: false,
+    state: "idle",
+    url: null,
+  };
 
-  const children: ManagedSidecarChild[] = [];
+  implementations: PackagedSidecarHandle["implementations"] = {
+    web: {
+      fallbackReason: "not-started",
+      source: "builtin",
+    },
+  };
 
-  try {
+  web: WebStatusSnapshot = {
+    state: "idle",
+    url: null,
+  };
+
+  private daemonChild: ManagedSidecarChild | null = null;
+  private operation: PackagedBundleOperation | null = null;
+  private webChild: ManagedSidecarChild | null = null;
+  private webTransitionReason: string | null = null;
+
+  constructor(
+    private readonly runtime: SidecarRuntimeContext<SidecarStamp>,
+    private readonly paths: PackagedNamespacePaths,
+    private readonly options: StartPackagedSidecarsOptions,
+  ) {}
+
+  async start(): Promise<this> {
+    await this.ensureRuntimeDirs();
+    try {
+      await this.startDaemon();
+      await this.startWebFromActivation();
+      return this;
+    } catch (error) {
+      await this.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async close(): Promise<void> {
+    const children = [this.webChild, this.daemonChild].filter((child): child is ManagedSidecarChild => child != null);
+    this.webChild = null;
+    this.daemonChild = null;
+    for (const child of children) {
+      await closeManagedChild(child).catch((error: unknown) => {
+        console.error(`failed to close packaged ${child.app} sidecar`, error);
+      });
+    }
+    const now = new Date().toISOString();
+    this.web = { pid: null, state: "stopped", updatedAt: now, url: null };
+    this.daemon = { desktopAuthGateActive: false, pid: null, state: "stopped", updatedAt: now, url: null };
+  }
+
+  webRuntimeTarget(): { unavailableReason?: string; url: string | null } {
+    if (this.webTransitionReason != null) {
+      return { unavailableReason: this.webTransitionReason, url: null };
+    }
+    if (this.web.url == null) return { unavailableReason: "web-unavailable", url: null };
+    return { url: this.web.url };
+  }
+
+  async handleBundleEvent(
+    message: SidecarEventMessage,
+  ): Promise<PackagedBundleOperationResult | undefined> {
+    switch (message.key) {
+      case SIDECAR_EVENTS.PACKAGED_BUNDLE_STATUS:
+        return await this.bundleStatus(message.payload.key);
+      case SIDECAR_EVENTS.PACKAGED_BUNDLE_ENSURE:
+        return await this.bundleEnsure(message.payload.key);
+      case SIDECAR_EVENTS.PACKAGED_BUNDLE_RESTART:
+        return await this.bundleRestart(message.payload.key);
+      case SIDECAR_EVENTS.PACKAGED_BUNDLE_SWITCH:
+        return await this.bundleSwitch(message.payload);
+      case SIDECAR_EVENTS.PACKAGED_BUNDLE_ACTIVATE:
+        return await this.bundleActivate(message.payload);
+      default:
+        return undefined;
+    }
+  }
+
+  private async ensureRuntimeDirs(): Promise<void> {
+    await mkdir(this.paths.namespaceRoot, { recursive: true });
+    await mkdir(this.paths.cacheRoot, { recursive: true });
+    await mkdir(this.paths.dataRoot, { recursive: true });
+    await mkdir(this.paths.bundleBasePath, { recursive: true });
+    await mkdir(this.paths.logsRoot, { recursive: true });
+    await mkdir(this.paths.desktopLogsRoot, { recursive: true });
+    await mkdir(this.paths.runtimeRoot, { recursive: true });
+    await mkdir(this.paths.updateRoot, { recursive: true });
+    await mkdir(this.paths.electronUserDataRoot, { recursive: true });
+    await mkdir(this.paths.electronSessionDataRoot, { recursive: true });
+  }
+
+  private async startDaemon(): Promise<void> {
     const daemon = await spawnSidecarChild({
       app: APP_KEYS.DAEMON,
-      entryPath: options.daemonSidecarEntry ?? resolveSidecarEntry("@open-design/daemon", "sidecar"),
-      env: buildPackagedDaemonSpawnEnv(paths, {
-        appVersion: options.appVersion,
-        daemonCliEntry: options.daemonCliEntry,
+      entryPath: this.options.daemonSidecarEntry ?? resolveSidecarEntry("@open-design/daemon", "sidecar"),
+      env: buildPackagedDaemonSpawnEnv(this.paths, {
+        appVersion: this.options.appVersion,
+        daemonCliEntry: this.options.daemonCliEntry,
         legacyDataDir: process.env.OD_LEGACY_DATA_DIR ?? null,
-        requireDesktopAuth: options.requireDesktopAuth,
-        telemetryRelayUrl: options.telemetryRelayUrl,
-        posthogKey: options.posthogKey,
-        posthogHost: options.posthogHost,
+        requireDesktopAuth: this.options.requireDesktopAuth,
+        telemetryRelayUrl: this.options.telemetryRelayUrl,
+        posthogKey: this.options.posthogKey,
+        posthogHost: this.options.posthogHost,
       }),
-      nodeCommand: options.nodeCommand,
-      paths,
-      runtime,
+      nodeCommand: this.options.nodeCommand,
+      paths: this.paths,
+      runtime: this.runtime,
     });
-    children.push(daemon);
+    this.daemonChild = daemon;
     const daemonStatus = await waitForStatus<DaemonStatusSnapshot>(
       daemon.ipcPath,
       (status) => status.url != null,
@@ -429,56 +528,285 @@ export async function startPackagedSidecars(
       // invalid OD_LEGACY_DATA_DIR, existing target payload, symlink,
       // marker write failure) leaves the packaged app waiting the full
       // 30-minute migration budget for a process that already died.
-      { child: daemon.child, logPath: logPathFor(paths, APP_KEYS.DAEMON) },
+      { child: daemon.child, logPath: logPathFor(this.paths, APP_KEYS.DAEMON) },
     );
     if (daemonStatus.url == null) throw new Error("daemon did not report a URL");
+    this.daemon = daemonStatus;
+  }
 
+  private async startWebFromActivation(): Promise<void> {
     const webImplementation = await resolvePackagedWebSidecarImplementation({
-      builtinEntryPath: options.webSidecarEntry,
-      bundleEpoch: options.bundleEpoch,
-      paths,
+      builtinEntryPath: this.options.webSidecarEntry,
+      bundleEpoch: this.options.bundleEpoch,
+      paths: this.paths,
     });
-    const webStandaloneRoot = webImplementation.webStandaloneRoot ?? options.webStandaloneRoot;
+    await this.startWebWithImplementation(webImplementation);
+  }
+
+  private async startWebWithImplementation(
+    webImplementation: PackagedWebSidecarImplementation,
+  ): Promise<void> {
+    if (this.daemon.url == null) throw new Error("daemon URL is required before starting web");
+    const webStandaloneRoot = webImplementation.webStandaloneRoot ?? this.options.webStandaloneRoot;
+    this.web = {
+      pid: null,
+      state: "starting",
+      updatedAt: new Date().toISOString(),
+      url: null,
+    };
     const web = await spawnSidecarChild({
       app: APP_KEYS.WEB,
       entryPath: webImplementation.entryPath ?? resolveSidecarEntry("@open-design/web", "sidecar"),
       env: {
-        [SIDECAR_ENV.DAEMON_PORT]: extractPort(daemonStatus.url),
+        [SIDECAR_ENV.DAEMON_PORT]: extractPort(this.daemon.url),
         [SIDECAR_ENV.WEB_PORT]: "0",
         ...sidecarImplementationEnv(webImplementation.implementation),
         ...(webStandaloneRoot == null ? {} : { OD_WEB_STANDALONE_ROOT: webStandaloneRoot }),
-        OD_WEB_OUTPUT_MODE: options.webOutputMode,
+        OD_WEB_OUTPUT_MODE: this.options.webOutputMode,
         PORT: "0",
       },
-      nodeCommand: options.nodeCommand,
-      paths,
-      runtime,
+      nodeCommand: this.options.nodeCommand,
+      paths: this.paths,
+      runtime: this.runtime,
     });
-    children.push(web);
-    const webStatus = await waitForStatus<WebStatusSnapshot>(
-      web.ipcPath,
-      (status) => status.url != null,
-    );
-    if (webStatus.url == null) throw new Error("web did not report a URL");
-
-    return {
-      daemon: daemonStatus,
-      implementations: {
-        web: webImplementation.implementation,
-      },
-      web: webStatus,
-      async close() {
-        for (const child of [...children].reverse()) {
-          await closeManagedChild(child).catch((error: unknown) => {
-            console.error(`failed to close packaged ${child.app} sidecar`, error);
-          });
-        }
-      },
-    };
-  } catch (error) {
-    for (const child of [...children].reverse()) {
-      await closeManagedChild(child).catch(() => undefined);
+    this.webChild = web;
+    try {
+      const webStatus = await waitForStatus<WebStatusSnapshot>(
+        web.ipcPath,
+        (status) => status.url != null,
+      );
+      if (webStatus.url == null) throw new Error("web did not report a URL");
+      this.web = webStatus;
+      this.implementations.web = webImplementation.implementation;
+      await this.options.onWebStatusChange?.(webStatus);
+    } catch (error) {
+      this.webChild = null;
+      await closeManagedChild(web).catch(() => undefined);
+      throw error;
     }
-    throw error;
   }
+
+  private async closeWebChild(): Promise<void> {
+    const child = this.webChild;
+    this.webChild = null;
+    if (child != null) {
+      await closeManagedChild(child).catch((error: unknown) => {
+        console.error("failed to close packaged web sidecar", error);
+      });
+    }
+    this.web = {
+      pid: null,
+      state: "stopped",
+      updatedAt: new Date().toISOString(),
+      url: null,
+    };
+  }
+
+  private assertSupportedBundleKey(key: string): void {
+    if (key !== PACKAGED_WEB_SIDECAR_BUNDLE_KEY) {
+      throw new Error(`unsupported packaged bundle key: ${key}; only ${PACKAGED_WEB_SIDECAR_BUNDLE_KEY} is available`);
+    }
+  }
+
+  private activationFromInput(input: PackagedBundleActivationInput): PackagedBundleActivationFile {
+    return input.source === "builtin"
+      ? createPackagedBundleActivationFile({ web: "builtin" })
+      : createPackagedBundleActivationFile({ web: { version: input.version } });
+  }
+
+  private async activationSnapshot(key: string): Promise<PackagedBundleActivationSnapshot> {
+    try {
+      const activation = await readPackagedBundleActivationFile(this.paths);
+      if (activation == null) {
+        return { key, path: this.paths.bundleActivationPath, source: "missing" };
+      }
+      if ("source" in activation && activation.source === "builtin") {
+        return { key: activation.key, path: this.paths.bundleActivationPath, source: "builtin" };
+      }
+      if (!("version" in activation)) {
+        throw new Error("activation file did not contain source=builtin or version");
+      }
+      return {
+        key: activation.key,
+        path: this.paths.bundleActivationPath,
+        source: "bundle",
+        version: activation.version,
+      };
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        key,
+        path: this.paths.bundleActivationPath,
+        source: "invalid",
+      };
+    }
+  }
+
+  private runtimeSnapshot(
+    key: string,
+    operation: PackagedBundleOperation | null = this.operation,
+  ): PackagedBundleRuntimeSnapshot {
+    const implementation = this.implementations.web;
+    const version = implementation.source === "bundle" ? implementation.ref?.version : undefined;
+    return {
+      activationPath: this.paths.bundleActivationPath,
+      bundleBasePath: this.paths.bundleBasePath,
+      ...(implementation.source === "builtin" && implementation.fallbackReason != null
+        ? { fallbackReason: implementation.fallbackReason }
+        : {}),
+      implementation,
+      key,
+      operation,
+      pid: this.web.pid ?? null,
+      source: implementation.source === "bundle" ? "bundle" : "builtin",
+      state: this.webTransitionReason != null ? "switching" : this.web.state,
+      updatedAt: this.web.updatedAt,
+      url: this.webRuntimeTarget().url,
+      ...(version == null ? {} : { version }),
+    };
+  }
+
+  private async operationResult(
+    operation: PackagedBundleOperation,
+    previous: PackagedBundleRuntimeSnapshot | undefined,
+    key = PACKAGED_WEB_SIDECAR_BUNDLE_KEY,
+  ): Promise<PackagedBundleOperationResult> {
+    return {
+      accepted: true,
+      activation: await this.activationSnapshot(key),
+      mode: "online",
+      operation,
+      ...(previous == null ? {} : { previous }),
+      runtime: this.runtimeSnapshot(key, operation === "status" ? this.operation : null),
+    };
+  }
+
+  private async resolveCandidateImplementation(
+    activation: PackagedBundleActivationFile,
+  ): Promise<PackagedWebSidecarImplementation> {
+    const implementation = await resolvePackagedWebSidecarImplementationForActivation({
+      activation,
+      builtinEntryPath: this.options.webSidecarEntry,
+      bundleEpoch: this.options.bundleEpoch,
+      paths: this.paths,
+    });
+    if ("version" in activation) {
+      const resolved = implementation.implementation;
+      if (resolved.source !== "bundle" || resolved.ref?.version !== activation.version) {
+        const reason = resolved.source === "builtin"
+          ? resolved.fallbackReason ?? "bundle-unresolved"
+          : "bundle-ref-mismatch";
+        throw new Error(`web bundle ${activation.version} is not available for this packaged runtime: ${reason}`);
+      }
+    }
+    return implementation;
+  }
+
+  private isWebRunning(): boolean {
+    return (
+      this.web.url != null &&
+      this.webChild != null &&
+      this.webChild.child.exitCode == null &&
+      this.webChild.child.signalCode == null
+    );
+  }
+
+  private async runExclusive(
+    operation: Exclude<PackagedBundleOperation, "status">,
+    run: () => Promise<PackagedBundleOperationResult>,
+  ): Promise<PackagedBundleOperationResult> {
+    if (this.operation != null) {
+      throw new Error(`packaged bundle operation already in progress: ${this.operation}`);
+    }
+
+    this.operation = operation;
+    try {
+      return await run();
+    } finally {
+      this.webTransitionReason = null;
+      this.operation = null;
+    }
+  }
+
+  private async bundleStatus(key: string): Promise<PackagedBundleOperationResult> {
+    this.assertSupportedBundleKey(key);
+    return await this.operationResult("status", undefined, key);
+  }
+
+  private async bundleEnsure(key: string): Promise<PackagedBundleOperationResult> {
+    this.assertSupportedBundleKey(key);
+    const transitionWeb = !this.isWebRunning();
+    return await this.runExclusive("ensure", async () => {
+      if (!transitionWeb) return await this.operationResult("ensure", undefined, key);
+      const previous = this.runtimeSnapshot(key, null);
+      this.webTransitionReason = "web-switching";
+      await this.closeWebChild();
+      await this.startWebFromActivation();
+      this.webTransitionReason = null;
+      return await this.operationResult("ensure", previous, key);
+    });
+  }
+
+  private async bundleRestart(key: string): Promise<PackagedBundleOperationResult> {
+    this.assertSupportedBundleKey(key);
+    return await this.runExclusive("restart", async () => {
+      const previous = this.runtimeSnapshot(key, null);
+      this.webTransitionReason = "web-switching";
+      await this.closeWebChild();
+      await this.startWebFromActivation();
+      this.webTransitionReason = null;
+      return await this.operationResult("restart", previous, key);
+    });
+  }
+
+  private async bundleActivate(input: PackagedBundleActivationInput): Promise<PackagedBundleOperationResult> {
+    this.assertSupportedBundleKey(input.key);
+    return await this.runExclusive("activate", async () => {
+      const previous = this.runtimeSnapshot(input.key, null);
+      const activation = this.activationFromInput(input);
+      await this.resolveCandidateImplementation(activation);
+      await writePackagedBundleActivationFile({ activation, paths: this.paths });
+      return await this.operationResult("activate", previous, input.key);
+    });
+  }
+
+  private async bundleSwitch(input: PackagedBundleActivationInput): Promise<PackagedBundleOperationResult> {
+    this.assertSupportedBundleKey(input.key);
+    return await this.runExclusive("switch", async () => {
+      const previous = this.runtimeSnapshot(input.key, null);
+      const activation = this.activationFromInput(input);
+      const candidate = await this.resolveCandidateImplementation(activation);
+      let previousStopped = false;
+
+      try {
+        this.webTransitionReason = "web-switching";
+        await this.closeWebChild();
+        previousStopped = true;
+        await this.startWebWithImplementation(candidate);
+        await writePackagedBundleActivationFile({ activation, paths: this.paths });
+        this.webTransitionReason = null;
+        return await this.operationResult("switch", previous, input.key);
+      } catch (error) {
+        if (!previousStopped) throw error;
+        await this.closeWebChild().catch(() => undefined);
+        try {
+          await this.startWebFromActivation();
+          this.webTransitionReason = null;
+        } catch (rollbackError) {
+          throw new Error(
+            `web bundle switch failed (${error instanceof Error ? error.message : String(error)}); rollback failed (${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)})`,
+          );
+        }
+        throw new Error(`web bundle switch failed and rolled back: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+  }
+}
+
+export async function startPackagedSidecars(
+  runtime: SidecarRuntimeContext<SidecarStamp>,
+  paths: PackagedNamespacePaths,
+  options: StartPackagedSidecarsOptions,
+): Promise<PackagedSidecarHandle> {
+  return await new PackagedSidecarSupervisor(runtime, paths, options).start();
 }

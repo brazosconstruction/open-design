@@ -17,6 +17,7 @@ import {
   type DesktopScreenshotInput,
   type DesktopUpdateInput,
   type RegisterDesktopAuthResult,
+  type SidecarEventMessage,
   type SidecarStamp,
   type WebStatusSnapshot,
 } from "@open-design/sidecar-proto";
@@ -75,6 +76,7 @@ export type DesktopMainOptions = {
    * Node fetch can hit.
    */
   discoverDaemonUrl?: () => Promise<string | null>;
+  handleSidecarEvent?: (message: SidecarEventMessage) => Promise<unknown | undefined>;
   preloadPath?: string;
   update?: {
     currentVersion?: string | null;
@@ -454,6 +456,10 @@ export async function runDesktopMain(
             case SIDECAR_EVENTS.DESKTOP_EXPORT_PDF:
               return await activeDesktop.exportPdf(request.payload);
             default:
+              if (options.handleSidecarEvent != null) {
+                const delegated = await options.handleSidecarEvent(request);
+                if (delegated !== undefined) return delegated;
+              }
               throw new Error("unsupported desktop sidecar event");
           }
         case SIDECAR_MESSAGES.STATUS:

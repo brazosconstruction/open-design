@@ -8,6 +8,7 @@ import {
   activatePackagedBuiltinWebBundle,
   activatePackagedWebBundle,
   readPackagedWebBundleActivation,
+  readPackagedWebBundleStatus,
 } from "../src/bundles.js";
 import type { ToolPackConfig } from "../src/config.js";
 
@@ -93,6 +94,22 @@ describe("packaged web bundle activation", () => {
     const root = await mkdtemp(join(tmpdir(), "od-tools-pack-bundles-"));
     try {
       await expect(activatePackagedWebBundle(makeConfig(root), "0.8.0.daemon.1")).rejects.toThrow(/\.web\.M/);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("falls back to offline activation status when packaged IPC is unavailable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "od-tools-pack-bundles-"));
+    try {
+      const config = makeConfig(root);
+      await activatePackagedWebBundle(config, "0.8.0.web.1");
+
+      await expect(readPackagedWebBundleStatus(config)).resolves.toMatchObject({
+        mode: "offline",
+        source: "bundle",
+        version: "0.8.0.web.1",
+      });
     } finally {
       await rm(root, { force: true, recursive: true });
     }

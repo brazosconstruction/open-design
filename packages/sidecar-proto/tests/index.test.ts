@@ -119,6 +119,50 @@ describe("open-design sidecar contract", () => {
     ).toThrow(/unknown sidecar event/);
   });
 
+  it("validates packaged bundle IPC event payloads", () => {
+    expect(normalizeDesktopSidecarMessage({
+      key: SIDECAR_EVENTS.PACKAGED_BUNDLE_STATUS,
+      payload: { key: "od:sidecar:web" },
+      type: SIDECAR_MESSAGES.EVENT,
+    })).toEqual({
+      key: "packaged.bundle.status",
+      payload: { key: "od:sidecar:web" },
+      type: "event",
+    });
+    expect(normalizeDesktopSidecarMessage({
+      key: SIDECAR_EVENTS.PACKAGED_BUNDLE_SWITCH,
+      payload: { key: "od:sidecar:web", version: "0.8.0-beta.4.web.2" },
+      type: SIDECAR_MESSAGES.EVENT,
+    })).toEqual({
+      key: "packaged.bundle.switch",
+      payload: { key: "od:sidecar:web", version: "0.8.0-beta.4.web.2" },
+      type: "event",
+    });
+    expect(normalizeDesktopSidecarMessage({
+      key: SIDECAR_EVENTS.PACKAGED_BUNDLE_ACTIVATE,
+      payload: { key: "od:sidecar:web", source: "builtin" },
+      type: SIDECAR_MESSAGES.EVENT,
+    })).toEqual({
+      key: "packaged.bundle.activate",
+      payload: { key: "od:sidecar:web", source: "builtin" },
+      type: "event",
+    });
+    expect(() =>
+      normalizeDesktopSidecarMessage({
+        key: SIDECAR_EVENTS.PACKAGED_BUNDLE_SWITCH,
+        payload: { key: "od:sidecar:web", source: "builtin", version: "0.8.0.web.1" },
+        type: SIDECAR_MESSAGES.EVENT,
+      }),
+    ).toThrow(/must not include version/);
+    expect(() =>
+      normalizeDesktopSidecarMessage({
+        key: SIDECAR_EVENTS.PACKAGED_BUNDLE_RESTART,
+        payload: { key: "od:sidecar:web", noisy: true },
+        type: SIDECAR_MESSAGES.EVENT,
+      }),
+    ).toThrow(/unsupported fields/);
+  });
+
   it("accepts a base64 register-desktop-auth payload", () => {
     const message = {
       input: { secret: "AAECAwQFBgcICQoLDA0ODw==" },

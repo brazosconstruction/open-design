@@ -1,5 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   BundleStoreError,
@@ -146,24 +146,17 @@ async function assertDirectory(path: string, label: string): Promise<void> {
   if (!info.isDirectory()) throw new Error(`${label} must be a directory`);
 }
 
-export async function resolvePackagedWebSidecarImplementation(options: {
+async function resolveParsedPackagedWebSidecarImplementation(options: {
+  activation: ParsedActivation;
   builtinEntryPath: string | null;
   bundleEpoch: string | null;
   paths: PackagedNamespacePaths;
 }): Promise<PackagedWebSidecarImplementation> {
-  let activation: ParsedActivation | null;
-  try {
-    activation = await readActivation(options.paths.bundleActivationPath);
-  } catch (error) {
-    return builtin(options.builtinEntryPath, `activation-invalid:${error instanceof Error ? error.message : String(error)}`);
-  }
-
-  if (activation == null) return builtin(options.builtinEntryPath, "activation-missing");
-  if (activation.type === "builtin") return builtin(options.builtinEntryPath, "binding-builtin");
+  if (options.activation.type === "builtin") return builtin(options.builtinEntryPath, "binding-builtin");
 
   try {
     if (options.bundleEpoch == null) return builtin(options.builtinEntryPath, "host-epoch-missing");
-    const parsedVersion = parseBundleEpochVersion(activation.ref.version);
+    const parsedVersion = parseBundleEpochVersion(options.activation.ref.version);
     if (parsedVersion.slug !== PACKAGED_WEB_SIDECAR_BUNDLE_SLUG) {
       return builtin(options.builtinEntryPath, `bundle-slug-mismatch:${parsedVersion.slug}`);
     }
@@ -173,13 +166,13 @@ export async function resolvePackagedWebSidecarImplementation(options: {
 
     const resolved = await resolveBundle({
       basePath: options.paths.bundleBasePath,
-      ref: activation.ref,
+      ref: options.activation.ref,
     });
     const artifact = await resolveBundleArtifact(resolved.path);
     if (artifact.descriptor.schemaVersion !== 2) {
       return builtin(options.builtinEntryPath, "bundle-descriptor-unsupported");
     }
-    if (artifact.descriptor.key !== activation.ref.key || artifact.descriptor.version !== activation.ref.version) {
+    if (artifact.descriptor.key !== options.activation.ref.key || artifact.descriptor.version !== options.activation.ref.version) {
       return builtin(options.builtinEntryPath, "bundle-descriptor-ref-mismatch");
     }
 
@@ -208,6 +201,37 @@ export async function resolvePackagedWebSidecarImplementation(options: {
   }
 }
 
+export async function resolvePackagedWebSidecarImplementation(options: {
+  builtinEntryPath: string | null;
+  bundleEpoch: string | null;
+  paths: PackagedNamespacePaths;
+}): Promise<PackagedWebSidecarImplementation> {
+  let activation: ParsedActivation | null;
+  try {
+    activation = await readActivation(options.paths.bundleActivationPath);
+  } catch (error) {
+    return builtin(options.builtinEntryPath, `activation-invalid:${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (activation == null) return builtin(options.builtinEntryPath, "activation-missing");
+  return await resolveParsedPackagedWebSidecarImplementation({
+    ...options,
+    activation,
+  });
+}
+
+export async function resolvePackagedWebSidecarImplementationForActivation(options: {
+  activation: PackagedBundleActivationFile;
+  builtinEntryPath: string | null;
+  bundleEpoch: string | null;
+  paths: PackagedNamespacePaths;
+}): Promise<PackagedWebSidecarImplementation> {
+  return await resolveParsedPackagedWebSidecarImplementation({
+    ...options,
+    activation: parseActivationFile(options.activation),
+  });
+}
+
 export function sidecarImplementationEnv(
   implementation: SidecarImplementationSnapshot,
 ): NodeJS.ProcessEnv {
@@ -222,6 +246,28 @@ export function createPackagedBundleActivationFile(input: {
   return input.web === "builtin"
     ? { key: PACKAGED_WEB_SIDECAR_BUNDLE_KEY, source: "builtin" }
     : { key: PACKAGED_WEB_SIDECAR_BUNDLE_KEY, version: input.web.version };
+}
+
+export async function readPackagedBundleActivationFile(
+  paths: Pick<PackagedNamespacePaths, "bundleActivationPath">,
+): Promise<PackagedBundleActivationFile | null> {
+  const activation = await readActivation(paths.bundleActivationPath);
+  if (activation == null) return null;
+  return activation.type === "builtin"
+    ? { key: PACKAGED_WEB_SIDECAR_BUNDLE_KEY, source: "builtin" }
+    : { key: PACKAGED_WEB_SIDECAR_BUNDLE_KEY, version: activation.ref.version };
+}
+
+export async function writePackagedBundleActivationFile(options: {
+  activation: PackagedBundleActivationFile;
+  paths: Pick<PackagedNamespacePaths, "bundleActivationPath">;
+}): Promise<void> {
+  await mkdir(dirname(options.paths.bundleActivationPath), { recursive: true });
+  await writeFile(
+    options.paths.bundleActivationPath,
+    `${JSON.stringify(options.activation, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 export function packagedBundleActivationPath(paths: Pick<PackagedNamespacePaths, "dataRoot">): string {

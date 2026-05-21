@@ -117,6 +117,14 @@ async function main(): Promise<void> {
     daemonCliEntry: config.daemonCliEntry,
     daemonSidecarEntry: config.daemonSidecarEntry,
     nodeCommand: config.nodeCommand,
+    onWebStatusChange: async (status) => {
+      if (status.url == null) return;
+      await writePackagedWebIdentity({
+        paths,
+        pid: process.pid,
+        url: status.url,
+      });
+    },
     telemetryRelayUrl: config.telemetryRelayUrl,
     posthogKey: config.posthogKey,
     posthogHost: config.posthogHost,
@@ -133,8 +141,8 @@ async function main(): Promise<void> {
     webOutputMode: config.webOutputMode,
   });
 
-  const webUrl = sidecars.web.url;
-  if (!webUrl) {
+  const webUrl = sidecars.webRuntimeTarget().url;
+  if (webUrl == null) {
     await sidecars.close().catch(() => undefined);
     await identity.close().catch(() => undefined);
     throw new Error("web sidecar failed to produce URL — check logs/desktop/latest.log");
@@ -154,12 +162,16 @@ async function main(): Promise<void> {
       const request = normalizeDesktopSidecarMessage(message);
       switch (request.type) {
         case SIDECAR_MESSAGES.EVENT:
-          if (request.key !== SIDECAR_EVENTS.INSPECT_STATUS) {
-            throw new Error(`unsupported headless sidecar event: ${request.key}`);
+          if (request.key === SIDECAR_EVENTS.INSPECT_STATUS) {
+            return { pid: process.pid, state: "running", url: sidecars.webRuntimeTarget().url, updatedAt: new Date().toISOString() };
           }
-          return { pid: process.pid, state: "running", url: webUrl, updatedAt: new Date().toISOString() };
+          {
+            const handled = await sidecars.handleBundleEvent(request);
+            if (handled !== undefined) return handled;
+          }
+          throw new Error(`unsupported headless sidecar event: ${request.key}`);
         case SIDECAR_MESSAGES.STATUS:
-          return { pid: process.pid, state: "running", url: webUrl, updatedAt: new Date().toISOString() };
+          return { pid: process.pid, state: "running", url: sidecars.webRuntimeTarget().url, updatedAt: new Date().toISOString() };
         case SIDECAR_MESSAGES.SHUTDOWN:
           setImmediate(() => {
             void shutdown().finally(() => process.exit(0));

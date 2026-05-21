@@ -98,7 +98,7 @@ async function main(): Promise<void> {
     webStandaloneRoot: config.webStandaloneRoot,
     webOutputMode: config.webOutputMode,
   });
-  registerOdProtocol(sidecars.web.url ?? "http://127.0.0.1:0");
+  registerOdProtocol(() => sidecars.webRuntimeTarget());
 
   const { runDesktopMain } = await import("@open-design/desktop/main");
   await runDesktopMain(runtime, {
@@ -118,6 +118,9 @@ async function main(): Promise<void> {
     // Electron's protocol handler.
     async discoverDaemonUrl() {
       return sidecars.daemon.url;
+    },
+    async handleSidecarEvent(message) {
+      return await sidecars.handleBundleEvent(message);
     },
     preloadPath: join(app.getAppPath(), "preload.cjs"),
     update: {
