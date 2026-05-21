@@ -17,6 +17,7 @@ export type ToolPackPlatform = "mac" | "win" | "linux";
 export type ToolPackBuildOutput = "all" | "app" | "appimage" | "dir" | "dmg" | "nsis" | "zip";
 export type ToolPackMacCompression = "store" | "normal" | "maximum";
 export type ToolPackWebOutputMode = "server" | "standalone";
+type ToolPackPrereleaseChannel = "beta" | "nightly" | "preview";
 
 export type ToolPackCliOptions = {
   appVersion?: string;
@@ -136,6 +137,22 @@ function resolveToolPackAppVersion(value: string | undefined): string | undefine
   if (normalized.length === 0) throw new Error("--app-version must not be empty");
   if (/\s/.test(normalized)) throw new Error(`--app-version must not contain whitespace: ${value}`);
   return normalized;
+}
+
+function channelFromAppVersion(value: string | undefined): ToolPackPrereleaseChannel | null {
+  if (value == null || value.length === 0) return null;
+  if (/(?:^|[-.])beta(?:[-.]|$)/i.test(value)) return "beta";
+  if (/(?:^|[-.])nightly(?:[-.]|$)/i.test(value)) return "nightly";
+  if (/(?:^|[-.])preview(?:[-.]|$)/i.test(value)) return "preview";
+  return null;
+}
+
+function defaultNamespaceForAppVersion(platform: ToolPackPlatform, appVersion: string | undefined): string {
+  const channel = channelFromAppVersion(appVersion);
+  if (channel == null) return SIDECAR_DEFAULTS.namespace;
+
+  const namespace = `release-${channel}`;
+  return platform === "mac" ? namespace : `${namespace}-${platform}`;
 }
 
 function resolveToolPackWebOutputMode(platform: ToolPackPlatform, value: string | undefined): ToolPackWebOutputMode {
@@ -260,10 +277,11 @@ export function resolveToolPackConfig(
   platform: ToolPackPlatform,
   options: ToolPackCliOptions = {},
 ): ToolPackConfig {
+  const appVersion = resolveToolPackAppVersion(options.appVersion);
   const namespace = resolveNamespace({
     contract: OPEN_DESIGN_SIDECAR_CONTRACT,
     env: process.env,
-    namespace: options.namespace ?? SIDECAR_DEFAULTS.namespace,
+    namespace: options.namespace ?? defaultNamespaceForAppVersion(platform, appVersion),
   });
   const toolPackRoot = resolve(options.dir ?? join(WORKSPACE_ROOT, ".tmp", "tools-pack"));
   const cacheRoot = resolve(options.cacheDir ?? join(toolPackRoot, "cache"));
@@ -273,7 +291,7 @@ export function resolveToolPackConfig(
   const runtimeNamespaceBaseRoot = join(toolPackRoot, "runtime", platform, "namespaces");
 
   return {
-    appVersion: resolveToolPackAppVersion(options.appVersion),
+    appVersion,
     containerized: options.containerized === true,
     electronBuilderCliPath: resolveElectronBuilderCliPath(),
     electronDistPath: resolveElectronDistPath(WORKSPACE_ROOT),
