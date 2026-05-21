@@ -222,7 +222,6 @@ Never inline a secret with `pkgs.writeText` or `home.file`.
 
 `nix/pnpm-deps.nix` is the single source of truth for the vendored pnpm
 store hash used by both `nix/package-daemon.nix` and
-<<<<<<< HEAD
 `nix/package-web.nix`. If `pnpm-lock.yaml` changes, run:
 
 ```bash
