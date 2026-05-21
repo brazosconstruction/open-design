@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-21T12:10:21.327Z",
+  "generatedAt": "2026-05-21T12:38:34.823Z",
   "contributors": {
     "huyhoangnhh98": {
       "lastAnnouncedTier": "spark",
@@ -1243,8 +1243,8 @@
     },
     "eli-tangerine": {
       "lastAnnouncedTier": "signal",
-      "lastKnownScore": 113,
-      "lastCheckedAt": "2026-05-21T11:21:32.249Z",
+      "lastKnownScore": 125,
+      "lastCheckedAt": "2026-05-21T12:38:34.823Z",
       "scoreVersion": "weighted-v1",
       "lastAnnouncedAt": "2026-05-20T14:08:14.257Z"
     },
