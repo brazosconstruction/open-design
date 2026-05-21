@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SettingsDialog } from '../../src/components/SettingsDialog';
@@ -10,6 +10,7 @@ import type { AgentInfo, AppConfig } from '../../src/types';
 describe('SettingsDialog media providers', () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
   });
 
   it('shows saved masked media provider keys like Composio does', () => {
@@ -337,6 +338,93 @@ describe('SettingsDialog media providers', () => {
       'https://daemon.example/v1',
     );
     expect(screen.getByText('Saved · ••••9876')).toBeTruthy();
+  });
+
+  it('keeps newer pending provider edits during reload when an older media autosave resolves', async () => {
+    vi.useFakeTimers();
+    const reloadMock = vi.fn(async () => ({
+      openai: {
+        apiKey: '',
+        apiKeyConfigured: true,
+        apiKeyTail: '9876',
+        baseUrl: 'https://daemon-openai.example/v1',
+      },
+      nanobanana: {
+        apiKey: '',
+        apiKeyConfigured: true,
+        apiKeyTail: '4444',
+        baseUrl: 'https://daemon-nanobanana.example/v1',
+        model: 'gemini-3.1-flash-image-preview',
+      },
+    }));
+    let resolveFirstPersist: (() => void) | null = null;
+    const firstPersist = new Promise<void>((resolve) => {
+      resolveFirstPersist = resolve;
+    });
+    const onPersist = vi.fn()
+      .mockImplementationOnce(() => firstPersist)
+      .mockImplementation(async () => undefined);
+    renderDialog(
+      {
+        ...saveableConfig(),
+        mediaProviders: {
+          openai: {
+            apiKey: '',
+            apiKeyConfigured: true,
+            apiKeyTail: '1234',
+            baseUrl: 'https://saved-openai.example/v1',
+          },
+          nanobanana: {
+            apiKey: '',
+            apiKeyConfigured: true,
+            apiKeyTail: '5555',
+            baseUrl: 'https://saved-nanobanana.example/v1',
+            model: 'gemini-3.1-flash-image-preview',
+          },
+        },
+      },
+      {
+        onPersist,
+        onReloadMediaProviders: reloadMock,
+      },
+    );
+
+    fireEvent.change(screen.getByLabelText('OpenAI API key'), {
+      target: { value: 'sk-openai-first-save' },
+    });
+    fireEvent.change(screen.getByLabelText('OpenAI Base URL'), {
+      target: { value: 'https://local-openai.example/v1' },
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(onPersist).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByLabelText('Nano Banana API key'), {
+      target: { value: 'sk-nanobanana-pending' },
+    });
+    fireEvent.change(screen.getByLabelText('Nano Banana Base URL'), {
+      target: { value: 'https://local-nanobanana.example/v1' },
+    });
+
+    await act(async () => {
+      resolveFirstPersist?.();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Reload from daemon' }));
+      await Promise.resolve();
+    });
+    expect(reloadMock).toHaveBeenCalledTimes(1);
+
+    expect((screen.getByLabelText('Nano Banana API key') as HTMLInputElement).value).toBe(
+      'sk-nanobanana-pending',
+    );
+    expect((screen.getByLabelText('Nano Banana Base URL') as HTMLInputElement).value).toBe(
+      'https://local-nanobanana.example/v1',
+    );
   });
 
   it('clears saved media keys only through the explicit Clear action', async () => {
