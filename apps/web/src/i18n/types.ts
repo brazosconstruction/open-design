@@ -892,8 +892,11 @@ export interface Dict {
   'integrations.lede': string;
   'integrations.agentReady': string;
   'integrations.areasAria': string;
+  'integrations.tabLabel.mcp': string;
+  'integrations.tabLabel.skills': string;
   'integrations.tabHint.mcp': string;
   'integrations.tabHint.connectors': string;
+  'integrations.tabHint.useEverywhere': string;
   'integrations.skillsTitle': string;
   'integrations.skillsBody': string;
   'mcpClient.title': string;
