@@ -135,7 +135,6 @@ import {
 } from './design-files/pluginFolderActions';
 import { CenteredLoader } from './Loading';
 import { Toast } from './Toast';
-import { WorkingDirPill } from './WorkingDirPill';
 import { useDesignMdState } from '../hooks/useDesignMdState';
 import { useFinalizeProject } from '../hooks/useFinalizeProject';
 import { useProjectDetail } from '../hooks/useProjectDetail';
@@ -3772,19 +3771,6 @@ export function ProjectView({
                 onProjectChange({ ...project, skillId });
               }}
               activePluginSnapshot={activePluginSnapshot}
-              composerFooterAccessory={
-                <WorkingDirPill
-                  projectId={project.id}
-                  resolvedDir={projectDetail.resolvedDir}
-                  onReplaced={(result) => {
-                    if (result.project) onProjectChange(result.project);
-                    void projectDetail.refresh();
-                    void refreshWorkspaceItems();
-                    onProjectsRefresh();
-                    if (result.entryFile) requestOpenFile(result.entryFile);
-                  }}
-                />
-              }
               onCollapse={() => setWorkspaceFocused(true)}
             />
           ) : (
