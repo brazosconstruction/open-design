@@ -906,7 +906,7 @@ export function SettingsDialog({
     try {
       const release = await fetchLatestGithubReleaseInfo();
       const latestTag = (release?.tagName ?? '').replace(/^v/, '');
-      if (latestTag && latestTag === appVersionInfo.version) {
+      if (release?.stale !== true && latestTag && latestTag === appVersionInfo.version) {
         setAboutToast(t('settings.alreadyLatest'));
         return;
       }
