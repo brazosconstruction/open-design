@@ -370,19 +370,43 @@ markers the agent is required to emit inline:
 
 ```text
 STEP_START|<step-id>|<single-line UTF-8 title>
-STEP_DONE|<step-id>|<single-line UTF-8 verdict text>
+STEP_DONE|<step-id>|<status>|<single-line UTF-8 verdict text>
 ```
+
+`<status>` is **agent-declared** and must be one of:
+
+- `pass` — verified, no issues
+- `warning` — verified but with caveats worth maintainer attention
+  (pre-existing bug surfaced, body/impl deviation later confirmed
+  intentional, etc.)
+- `fail` — verified, claim did NOT land or a regression was
+  introduced by this PR
+- `inconclusive` — could not verify (state setup failed, surface
+  unavailable, etc.)
+
+The renderer does NOT infer status from verdict prose. Free-form
+phrasing like "However…", "pre-existing", or "not a regression" is
+human-readable explanation; the renderer reads only the declared
+`<status>` field. This makes the spec robust against model wording
+drift — if a future model rephrases its prose, status classification
+stays correct.
 
 Wire format and parser — exact rule:
 
-The parser splits each line at most twice on `|`, giving 3 fields:
-marker keyword, step-id, payload. The third field (`<title>` or
-`<verdict>`) is **the rest of the line as-is** and **may freely
-contain `|`** without escaping. Concretely the parser regex is
-`^STEP_(START|DONE)\|(step-\d{2,})\|(.+)$`, where the third capture
-group is greedy `.+`. A title like `Product | Library dropdown shows
-expected children` parses correctly because the parser never splits
-past the second `|`.
+The parser splits `STEP_START` lines at most twice on `|` (3 fields:
+keyword / step-id / title) and `STEP_DONE` lines at most three times
+on `|` (4 fields: keyword / step-id / status / verdict). The final
+field (`<title>` or `<verdict>`) is **the rest of the line as-is**
+and **may freely contain `|`** without escaping. Concrete parser:
+
+```
+STEP_START regex: ^STEP_START\|(step-\d{2,})\|(.+)$
+STEP_DONE  regex: ^STEP_DONE\|(step-\d{2,})\|(pass|warning|fail|inconclusive)\|(.+)$
+```
+
+In both cases the final group is greedy `(.+)`. A verdict like
+`Product | Library dropdown shows expected children` parses correctly
+because the parser never splits past the last required `|`.
 
 Constraints (machine-enforced by `e2e/scripts/agent-pr-explore-extract.ts`):
 
@@ -429,18 +453,30 @@ Mandatory layout, in order:
    ```text
    ## 🤖 Agent Explore Report
 
-   **Verdict**: <emoji> <pass | inconclusive | fail> · **Coverage**: N scenarios · **Walltime**: Xm Ys · **Approved by**: @<approver-login>
-   **Findings**: P critical · Q worth attention · R passed
+   **Verdict**: <emoji> <pass | inconclusive | fail> · **Coverage**: N scenarios · **Approved by**: @<approver-login>
+   **Findings**: F fail · W warning · U unknown · P pass
    ```
 
-   `Approved by` is pulled from the GitHub Deployments API for the
-   approved deployment that gated this run; never hand-formatted.
+   `Approved by` comes from `github.triggering_actor`, which for
+   environment-approval-gated runs is the user who clicked Approve
+   (verified against the GitHub Actions context).
 
-2. **Findings worth attention section** — every `⚠️` and `❌` step,
-   each rendered as `#### step-NN — <title>` followed by the verdict
-   text. **Expanded by default.** If both counts are zero the entire
-   section (including the heading) is omitted — never render
-   "no findings worth attention" boilerplate.
+   The four counts at the bottom (`fail / warning / unknown / pass`)
+   come directly from the agent-declared `<status>` field in each
+   STEP_DONE marker. The renderer does NOT re-classify based on
+   phrasing.
+
+2. **Mixed-surface PR warning** (conditional) — when the PR touched
+   both `apps/web` and `apps/landing-page`, a single blockquote
+   right under the header notes that only the apps/web pass ran and
+   landing-page changes were not verified. See § Launch model.
+
+3. **Findings worth attention section** — every `fail`, `warning`,
+   and `unknown` (parse-failure) step, in that priority order. Each
+   rendered as `#### <icon> step-NN — <title>` followed by the
+   verdict text. **Expanded by default.** If all three counts are
+   zero the entire section (including the heading) is omitted —
+   never render "no findings worth attention" boilerplate.
 
 3. **Passed scenarios** — wrapped in:
 
@@ -479,10 +515,10 @@ Mandatory layout, in order:
 
 Anti-patterns the wrapper must reject at render time:
 
-- Surfacing a `✅` step above a `⚠️`/`❌` (visual priority must match
+- Surfacing a `pass` step above a `warning`/`fail` (visual priority must match
   semantic priority)
 - Rendering an empty "Findings worth attention" header
-- Counting an `unknown` (parse-failure) step as `passed` — these
+- Counting an `unknown` (parse-failure) step as `pass` — these
   surface in the findings section with the explicit parse-failure
   string described in Wire format above
 
@@ -568,7 +604,7 @@ of PR are eligible to be approved.
 | Phase | Trigger to enter | Required-reviewers list | Output sink | Approvable PRs |
 |---|---|---|---|---|
 | **P0** | Now | n/a (spec review) | n/a | n/a |
-| **P1-private** | Spec + impl PR merged | `@lefarcen` only | **Maintainer-only channel** (Discord webhook / private tracking issue / generic webhook URL — repo-configurable). No public PR comments yet. | Internal same-repo |
+| **P1-private** | Spec + impl PR merged | `@lefarcen` only | **GitHub Actions artifact only** (the rendered comment.md + raw session jsonl). Maintainers access via the Actions UI. No public PR comments, no out-of-band webhook (a webhook posted from inside the agent job would bypass `gh-aw`'s threat-detection job — see Security). Routing notifications to Discord/Slack is a separate workflow that subscribes to the artifact-upload event. | Internal same-repo |
 | **P1-public** | After ~5 P1-private runs with no false alarms AND maintainer agreement on the comment format | Same as P1-private | Switch to public `safe-outputs.add-comment` via a small follow-up PR | Internal same-repo |
 | **P2** | After P1-public sees ~30 approved runs, accuracy ≥ 70% | Full pool (`mrcfps`, `nettee`, `Siri-Ray`, `PerishCode`, `qiongyu1999`, `lefarcen`) | Public `add-comment` | Internal same-repo only — fork PR coverage requires a separate spec (see Scope § Note on external / fork PRs) |
 | **P3** | After accuracy plateau | Same as P2 | Same | Add Playwright trace recording; pilot adversarial-coverage agent |

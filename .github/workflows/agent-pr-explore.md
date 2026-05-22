@@ -223,57 +223,31 @@ post-steps:
       # this is the user who clicked Approve, not the PR author. See
       # spec § Comment output format for the Approved by contract.
       APPROVER: ${{ github.triggering_actor }}
+      MIXED_PR: ${{ steps.surface.outputs.mixed_pr }}
     run: |
       mkdir -p /tmp/agent-report
+      mixed_flag=""
+      if [ "$MIXED_PR" = "true" ]; then mixed_flag="--mixed-pr"; fi
       node --experimental-strip-types e2e/scripts/agent-pr-explore-extract.ts \
         --input "${GH_AW_AGENT_OUTPUT_DIR}/agent_output.json" \
         --pr "$PR_NUMBER" \
         --head "$HEAD_SHA" \
         --approver "$APPROVER" \
         --output /tmp/agent-report/comment.md \
+        $mixed_flag \
       || echo "wrapper failed — see uploaded session jsonl" > /tmp/agent-report/comment.md
 
-  # P1-private: route the rendered report to a maintainer-only channel
-  # via a generic webhook URL (Discord, Slack, internal endpoint, etc).
-  # No public PR comment yet. If PRIVATE_REPORT_WEBHOOK_URL is unset,
-  # falls back to upload-artifact only (still accessible to
-  # maintainers via the Actions UI).
-  #
-  # P1-public (separate follow-up PR): replace this step with a
-  # `safe-outputs.add-comment` entry that publishes to the PR.
-  - name: Post report to private channel
-    if: always()
-    shell: bash
-    env:
-      WEBHOOK_URL: ${{ secrets.PRIVATE_REPORT_WEBHOOK_URL }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
-      PR_URL: ${{ github.event.pull_request.html_url }}
-    run: |
-      if [ -z "$WEBHOOK_URL" ]; then
-        echo "PRIVATE_REPORT_WEBHOOK_URL not set — report only in artifact."
-        exit 0
-      fi
-      # Generic payload — Discord and Slack both accept a JSON body
-      # with a 'content' field; repo-specific receivers can adapt.
-      body=$(cat /tmp/agent-report/comment.md)
-      # Cap body to 1900 chars to stay under most webhook limits;
-      # full report still in artifact.
-      truncated=$(echo "$body" | head -c 1900)
-      payload=$(jq -n \
-        --arg pr "$PR_NUMBER" \
-        --arg url "$PR_URL" \
-        --arg body "$truncated" \
-        '{content: "🤖 Agent report for PR \($pr) — \($url)\n\n\($body)"}')
-      curl -sS -X POST -H "Content-Type: application/json" \
-        -d "$payload" "$WEBHOOK_URL" || true
-
 # Safe-outputs: P1-private uses only upload-artifact (the rendered
-# report + the raw session jsonl). No public PR comment — see spec
-# § Rollout for the P1-private vs P1-public split.
+# report + the raw session jsonl). The previous draft had a
+# `Post report to private channel` post-step that POSTed the rendered
+# report to a webhook before gh-aw's threat-detection job ran — that
+# bypassed the secret-leak / prompt-injection gates and is removed.
+# Maintainers access the report from the Actions UI artifact during
+# P1-private; notification routing is the job of a separate workflow
+# that subscribes to the artifact-upload event if needed.
 #
-# Threat-detection still runs on the agent's output even though we're
-# not surfacing it as a PR comment; gh-aw enforces that on any
-# safe-output operation including upload-artifact.
+# Threat-detection runs on the agent's output before safe-outputs;
+# upload-artifact only fires if detection passes.
 safe-outputs:
   upload-artifact:
     max-uploads: 1
@@ -306,15 +280,24 @@ You MUST emit two marker lines per scenario, exactly:
 
 ```text
 STEP_START|step-NN|<single-line title, max 500 chars>
-STEP_DONE|step-NN|<single-line verdict, max 500 chars>
+STEP_DONE|step-NN|<status>|<single-line verdict, max 500 chars>
 ```
+
+`<status>` is **declared explicitly** as one of:
+
+- `pass` — the scenario verified the claim, no issues to flag
+- `warning` — verified but with caveats worth a human reviewer's attention (e.g. pre-existing bug surfaced, body/impl deviation that turned out intentional)
+- `fail` — verified, claim did NOT land or a real regression was introduced by this PR
+- `inconclusive` — could not verify in this run (state setup failed, surface unavailable, etc); not the same as "passed"
+
+Do NOT rely on prose phrasing to convey severity. The renderer parses your declared `<status>` directly; phrasing in the verdict is the human-readable explanation only.
 
 Hard rules:
 
-- `step-NN` is `step-` followed by zero-padded two-digit count starting at `step-01`, monotonic, no skips.
+- `step-NN` is `step-` followed by zero-padded two-digit count starting at `step-01`, monotonic, no skips, no duplicates.
 - Title and verdict are single line each. Newlines or control characters fail validation.
-- Pipe `|` is allowed inside title and verdict freely; the parser is `^STEP_(START|DONE)\|(step-\d{2,})\|(.+)$` (greedy third group).
-- Every `STEP_START` must be matched by a `STEP_DONE` with the same id before you end the session.
+- Pipe `|` is allowed inside the verdict freely; the parser is `^STEP_DONE\|(step-\d{2,})\|(pass|warning|fail|inconclusive)\|(.+)$` (greedy verdict group).
+- Every `STEP_START` must be matched by exactly one `STEP_DONE` with the same id before you end the session. Duplicate markers or missing pairs surface in the report as `status: unknown` with the explicit reason.
 - No `## Step Done:` headers, no emoji-only verdicts, no markdown. Just the marker line itself.
 
 Anything else in your output is ignored by the wrapper but is preserved in the session jsonl for forensics.
@@ -357,7 +340,7 @@ The dev server renders user-authored content (PR-author's UI changes plus produc
 
 - Never modify files, never `git commit`, never `git push`, never run `gh pr` write commands.
 - Never write secrets, env vars, or tokens into any STEP_DONE or sediment line.
-- If `$OD_BASE_URL` is unreachable after 3 retry attempts, emit a paired `STEP_START|step-NN|Verify dev server reachable at $OD_BASE_URL` followed by `STEP_DONE|step-NN|Dev server unreachable after 3 retries — aborting run`, then `RUN_DONE|fail|dev server never came up`, and end the session. The marker contract is non-negotiable; abort still requires a paired START/DONE.
+- If `$OD_BASE_URL` is unreachable after 3 retry attempts, emit a paired `STEP_START|step-NN|Verify dev server reachable at $OD_BASE_URL` followed by `STEP_DONE|step-NN|fail|Dev server unreachable after 3 retries — aborting run`, then `RUN_DONE|fail|dev server never came up`, and end the session. The marker contract is non-negotiable; abort still requires paired START/DONE with an explicit status.
 - Do NOT exceed 16 STEP_DONE pairs in one run — if you can't cover the body claims in 16 steps, your scenario design is too granular; consolidate.
 - Output language: English. Internal-team UI strings may be in any language; your verdicts are English (machine-parsed downstream).
 
