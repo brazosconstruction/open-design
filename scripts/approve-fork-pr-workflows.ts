@@ -173,14 +173,22 @@ export async function waitForPendingApprovalRuns(
   loadRuns: () => Promise<WorkflowRun[]>,
   sleep: (ms: number) => Promise<void> = delay,
 ): Promise<WorkflowRun[]> {
-  let pendingRuns = await loadRuns();
+  const pendingRuns = new Map<number, WorkflowRun>();
 
-  for (let attempt = 1; pendingRuns.length === 0 && attempt < pendingRunPollAttempts; attempt += 1) {
+  const collectRuns = async (): Promise<void> => {
+    for (const run of await loadRuns()) {
+      pendingRuns.set(run.id, run);
+    }
+  };
+
+  await collectRuns();
+
+  for (let attempt = 1; attempt < pendingRunPollAttempts; attempt += 1) {
     await sleep(pendingRunPollIntervalMs);
-    pendingRuns = await loadRuns();
+    await collectRuns();
   }
 
-  return pendingRuns;
+  return [...pendingRuns.values()];
 }
 
 async function github<T>(path: string, init: RequestInit = {}): Promise<T> {

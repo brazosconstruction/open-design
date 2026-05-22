@@ -199,6 +199,53 @@ test("runTargetsPullRequest rejects runs that GitHub already associates to a dif
   assert.equal(runTargetsPullRequest(run, pull, [pull]), false);
 });
 
+test("runTargetsPullRequest approves only the run that GitHub associates to the current PR when two PRs share a head SHA", () => {
+  const pull = {
+    number: 2683,
+    state: "open",
+    changed_files: 1,
+    head: {
+      sha: "734076155c44e569304856590019cea54506fdab",
+      repo: { full_name: "someone/open-design" },
+    },
+    base: {
+      ref: "main",
+      sha: "4cd93a5c7a7b0db1961c854e55f8e0e6b1b45542",
+      repo: { full_name: "nexu-io/open-design" },
+    },
+  };
+
+  const otherPull = {
+    ...pull,
+    number: 3001,
+    base: {
+      ref: "release",
+      sha: "8db117d728f967d108f6fdd64cb8d921d057f7f6",
+      repo: { full_name: "nexu-io/open-design" },
+    },
+  };
+
+  const currentPrRun = {
+    id: 26273463769,
+    name: "CI",
+    event: "pull_request",
+    status: "completed",
+    conclusion: "action_required",
+    head_sha: pull.head.sha,
+    path: ".github/workflows/ci.yml@main",
+    pull_requests: [pull],
+  };
+
+  const otherPrRun = {
+    ...currentPrRun,
+    id: 26273463770,
+    pull_requests: [otherPull],
+  };
+
+  assert.equal(runTargetsPullRequest(currentPrRun, pull, [pull, otherPull]), true);
+  assert.equal(runTargetsPullRequest(otherPrRun, pull, [pull, otherPull]), false);
+});
+
 test("isDeniedChangedPath blocks common tool config files under allowlisted source trees", () => {
   assert.equal(isDeniedChangedPath("apps/web/vitest.config.ts"), true);
   assert.equal(isDeniedChangedPath("apps/web/vite.config.ts"), true);
@@ -206,7 +253,7 @@ test("isDeniedChangedPath blocks common tool config files under allowlisted sour
   assert.equal(isDeniedChangedPath("apps/web/src/app/page.tsx"), false);
 });
 
-test("waitForPendingApprovalRuns retries until action_required runs appear", async () => {
+test("waitForPendingApprovalRuns retries until action_required runs appear and keeps polling through the retry window", async () => {
   const run = {
     id: 26273463769,
     name: "CI",
@@ -229,7 +276,43 @@ test("waitForPendingApprovalRuns retries until action_required runs appear", asy
   );
 
   assert.deepEqual(pendingRuns, [run]);
-  assert.deepEqual(sleeps, [3000, 3000]);
+  assert.deepEqual(sleeps, [3000, 3000, 3000]);
+});
+
+test("waitForPendingApprovalRuns keeps polling and unions newly discovered runs across the retry window", async () => {
+  const ciRun = {
+    id: 26273463769,
+    name: "CI",
+    event: "pull_request",
+    status: "completed",
+    conclusion: "action_required",
+    head_sha: "734076155c44e569304856590019cea54506fdab",
+    path: ".github/workflows/ci.yml@main",
+    pull_requests: [],
+  };
+  const visualRun = {
+    id: 26273463770,
+    name: "Visual PR Verify",
+    event: "pull_request",
+    status: "completed",
+    conclusion: "action_required",
+    head_sha: "734076155c44e569304856590019cea54506fdab",
+    path: ".github/workflows/visual-pr-verify.yml@main",
+    pull_requests: [],
+  };
+
+  const batches = [[ciRun], [ciRun], [ciRun, visualRun], [ciRun, visualRun]];
+  const sleeps: number[] = [];
+
+  const pendingRuns = await waitForPendingApprovalRuns(
+    async () => batches.shift() ?? [ciRun, visualRun],
+    async (ms) => {
+      sleeps.push(ms);
+    },
+  );
+
+  assert.deepEqual(pendingRuns, [ciRun, visualRun]);
+  assert.deepEqual(sleeps, [3000, 3000, 3000]);
 });
 
 test("waitForPendingApprovalRuns stops after the bounded retry budget", async () => {
