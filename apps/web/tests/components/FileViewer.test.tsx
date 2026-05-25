@@ -1773,6 +1773,75 @@ describe('FileViewer tweaks toolbar', () => {
     expect(screen.queryByTestId('annotation-style-summary')).toBeNull();
   });
 
+  it('switches to the comment panel after saving an annotation comment', async () => {
+    function Harness() {
+      const [comments, setComments] = useState<PreviewComment[]>([]);
+      return (
+        <FileViewer
+          projectId="project-1"
+          projectKind="prototype"
+          file={htmlPreviewFile()}
+          liveHtml='<html><body><main data-od-id="hero">Hero</main></body></html>'
+          previewComments={comments}
+          onSavePreviewComment={async (target, note) => {
+            const saved: PreviewComment = {
+              id: 'comment-saved',
+              projectId: 'project-1',
+              conversationId: 'conversation-1',
+              filePath: target.filePath,
+              elementId: target.elementId,
+              selector: target.selector,
+              label: target.label,
+              text: target.text,
+              htmlHint: target.htmlHint,
+              position: target.position,
+              style: target.style,
+              selectionKind: target.selectionKind,
+              memberCount: target.memberCount,
+              podMembers: target.podMembers,
+              note,
+              status: 'open',
+              createdAt: 20,
+              updatedAt: 20,
+            };
+            setComments([saved]);
+            return saved;
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    const frame = screen.getByTestId('artifact-preview-frame') as HTMLIFrameElement;
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: {
+        type: 'od:comment-target',
+        elementId: 'hero',
+        selector: '[data-od-id="hero"]',
+        label: 'Hero',
+        text: 'Hero',
+        position: { x: 8, y: 12, width: 120, height: 48 },
+        htmlHint: '<main data-od-id="hero">Hero</main>',
+      },
+    }));
+
+    const input = await screen.findByTestId('comment-popover-input');
+    fireEvent.change(input, { target: { value: '加大字号' } });
+    fireEvent.click(screen.getByTestId('comment-popover-save'));
+
+    await waitFor(() => expect(screen.queryByTestId('comment-popover')).toBeNull());
+    expect(screen.getByTestId('comment-side-panel')).toBeTruthy();
+    expect(screen.getByTestId('comment-panel-toggle').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByText('加大字号')).toBeTruthy();
+    const activeItem = document.querySelector('[data-comment-id="comment-saved"]');
+    expect(activeItem?.className).toContain('active');
+    expect(activeItem?.getAttribute('aria-current')).toBe('true');
+  });
+
   it('returns to element picking from the Comment button while another annotation tool is active', async () => {
     render(
       <FileViewer

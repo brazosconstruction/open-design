@@ -5837,14 +5837,24 @@ function HtmlViewer({
   async function savePersistentComment() {
     if (!activeCommentTarget || !commentDraft.trim() || !onSavePreviewComment) return;
     const isFreePin = activeCommentTarget.elementId.startsWith('pin-');
-    const saved = await onSavePreviewComment(
-      targetFromSnapshot(activeCommentTarget),
-      commentDraft.trim(),
-      false,
-    );
-    if (saved) {
-      clearBoardComposer();
-      setCommentSavedToast(isFreePin ? t('chat.comments.pinSavedToast') : t('chat.comments.savedToast'));
+    setSendingBoardBatch(true);
+    try {
+      const saved = await onSavePreviewComment(
+        targetFromSnapshot(activeCommentTarget),
+        commentDraft.trim(),
+        false,
+      );
+      if (saved) {
+        clearBoardComposer();
+        setBoardMode(true);
+        setCommentCreateMode(true);
+        setCommentPanelOpen(true);
+        setCommentSidePanelCollapsed(false);
+        setActivePreviewCommentId(saved.id);
+        setCommentSavedToast(isFreePin ? t('chat.comments.pinSavedToast') : t('chat.comments.savedToast'));
+      }
+    } finally {
+      setSendingBoardBatch(false);
     }
   }
 
