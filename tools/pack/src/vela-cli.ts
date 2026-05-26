@@ -2,6 +2,7 @@ import { chmod, cp, mkdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export const VELA_CLI_BIN_ENV = "OPEN_DESIGN_VELA_CLI_BIN";
+const OPEN_CODE_COMPANION_RELATIVE_PATH = ["libexec", "opencode"] as const;
 
 type VelaCliPlatform = "linux" | "mac" | "win";
 type VelaCliResolveResult =
@@ -47,42 +48,53 @@ export async function copyOptionalVelaCliBinary({
   const target = join(resourceRoot, "bin", targetBinaryName(platform));
   await mkdir(dirname(target), { recursive: true });
   await cp(source, target);
-  await copyAdjacentSupportTree({ source, target, supportTreeName: "libexec" });
+  await copyBundledOpenCodeTree({ requireBundled, resourceRoot, source });
   if (platform !== "win") {
     await chmod(target, 0o755);
   }
   return { source, target };
 }
 
-async function copyAdjacentSupportTree({
-  source,
-  target,
-  supportTreeName,
-}: {
-  source: string;
-  target: string;
-  supportTreeName: string;
-}): Promise<void> {
-  const sourceSupportTree = join(dirname(source), supportTreeName);
-  const targetSupportTree = join(dirname(target), supportTreeName);
-
-  try {
-    const sourceSupportTreeStat = await stat(sourceSupportTree);
-    if (!sourceSupportTreeStat.isDirectory()) return;
-  } catch (error) {
-    if (isNotFoundError(error)) return;
-    throw error;
-  }
-
-  await cp(sourceSupportTree, targetSupportTree, { recursive: true });
+export function resolveVelaCliOpenCodeCompanionTree(source: string): string {
+  return join(dirname(source), ...OPEN_CODE_COMPANION_RELATIVE_PATH);
 }
 
-function isNotFoundError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    "code" in error &&
-    (error as NodeJS.ErrnoException).code === "ENOENT"
-  );
+export async function resolveOptionalVelaCliOpenCodeCompanionTree(
+  source: string,
+): Promise<string | null> {
+  const sourceTree = resolveVelaCliOpenCodeCompanionTree(source);
+  return (await isDirectory(sourceTree)) ? sourceTree : null;
+}
+
+async function copyBundledOpenCodeTree({
+  requireBundled,
+  resourceRoot,
+  source,
+}: {
+  requireBundled: boolean;
+  resourceRoot: string;
+  source: string;
+}): Promise<void> {
+  const sourceTree = resolveVelaCliOpenCodeCompanionTree(source);
+  const targetTree = join(resourceRoot, "bin", ...OPEN_CODE_COMPANION_RELATIVE_PATH);
+  if (!(await isDirectory(sourceTree))) {
+    if (requireBundled) {
+      throw strictResolutionError(
+        `unable to resolve bundled Vela CLI: OpenCode companion directory is missing at ${sourceTree}`,
+      );
+    }
+    return;
+  }
+  await cp(sourceTree, targetTree, { force: true, recursive: true });
+}
+
+async function isDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 export async function resolveOptionalVelaCliBinary({
