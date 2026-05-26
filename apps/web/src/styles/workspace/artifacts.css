@@ -776,9 +776,15 @@
   transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
 .agent-card-installed {
+  display: block;
   padding: 0;
   min-height: 72px;
   overflow: hidden;
+}
+.agent-card-main {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
 }
 .agent-card-select {
   flex: 1;
@@ -815,16 +821,43 @@
   border-color: var(--border-strong);
 }
 .agent-card.active {
-  border-color: var(--border);
-  background: color-mix(in srgb, var(--accent-tint) 54%, var(--bg-panel));
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: var(--bg-panel);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--bg-panel) 88%, transparent) inset,
+    0 10px 28px color-mix(in srgb, var(--text) 9%, transparent);
 }
 .agent-card.active::before {
   content: '';
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--accent);
+  inset: 12px auto 12px 0;
+  width: 4px;
+  border-radius: 0 999px 999px 0;
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 56%, var(--selected)));
+}
+.agent-card-installed.active .agent-card-main {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent-tint) 32%, var(--bg-panel)),
+      color-mix(in srgb, var(--accent-tint) 10%, var(--bg-panel))
+    );
+}
+.agent-card-installed.active .agent-card-select {
+  min-height: 78px;
+  padding: 14px 18px 12px 22px;
+}
+.agent-card-installed.active .agent-icon {
+  border-radius: 11px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 16%, var(--border-soft)),
+    0 8px 18px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.agent-card-installed.active .agent-card-name {
+  font-size: 13px;
+}
+.agent-card-installed.active .agent-card-meta {
+  margin-top: 1px;
 }
 .agent-card.disabled {
   cursor: not-allowed;
@@ -949,6 +982,29 @@
   line-height: 1.35;
 }
 .agent-card-meta .muted { color: var(--text-soft); font-style: italic; }
+.agent-card-model-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-card-model-summary span {
+  flex: 0 0 auto;
+}
+.agent-card-model-summary strong {
+  min-width: 0;
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .agent-model-row-head {
   font-size: 12px;
   color: var(--text);
@@ -965,6 +1021,20 @@
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
 }
+.agent-card-config {
+  display: grid;
+  gap: 9px;
+  padding: 16px 24px 18px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border-soft));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-subtle) 52%, var(--bg-panel)),
+      color-mix(in srgb, var(--bg-panel) 92%, var(--bg-subtle))
+    );
+}
+.agent-card-config select,
+.agent-card-config input,
 .agent-model-row select,
 .agent-model-row input,
 .agent-cli-env select,
@@ -986,7 +1056,9 @@
   border-radius: var(--radius-sm);
   background: var(--bg-panel);
 }
+.agent-card-config .field,
 .agent-model-row .field { gap: 4px; }
+.agent-card-config .field-label,
 .agent-model-row .field-label {
   display: inline-flex;
   align-items: center;
@@ -996,6 +1068,11 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
+}
+.agent-card-config .field-label {
+  margin-bottom: 2px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
 }
 .agent-model-source-badge {
   display: inline-flex;
@@ -1032,7 +1109,12 @@
   margin-right: 6px;
   color: var(--text-muted);
 }
+.agent-card-config .hint,
 .agent-model-row .hint { margin: 0; font-size: 11.5px; }
+.agent-card-config .hint {
+  color: var(--text-muted);
+  line-height: 1.35;
+}
 .agent-model-select-wrap {
   position: relative;
 }
@@ -1042,6 +1124,14 @@
   background-image: none;
   padding-right: 28px;
   width: 100%;
+}
+.agent-card-config .agent-model-select-wrap select {
+  min-height: 36px;
+  border-color: color-mix(in srgb, var(--border) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-subtle) 82%, var(--bg-panel));
+}
+.agent-card-config .agent-model-select-wrap select:hover {
+  border-color: var(--border-strong);
 }
 .agent-model-select-chevron {
   position: absolute;
@@ -2176,4 +2266,3 @@
   font-weight: 500;
   color: var(--accent);
 }
-

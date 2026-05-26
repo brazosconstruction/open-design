@@ -1945,6 +1945,169 @@ export function SettingsDialog({
   const activeHeader = sectionHeader[activeSection];
   const installedAgents = agents.filter((a) => a.available);
   const unavailableAgents = agents.filter((a) => !a.available);
+  const agentModelOptionLabel = (
+    model: ProviderModelOption | undefined,
+    fallback: string,
+  ) => {
+    if (!model) return fallback;
+    if (model.label && model.label !== model.id) {
+      return `${model.label} (${model.id})`;
+    }
+    return model.label || model.id;
+  };
+  const agentModelSummary = (agent: AgentInfo) => {
+    if (!Array.isArray(agent.models) || agent.models.length === 0) return null;
+    const choice = cfg.agentModels?.[agent.id] ?? {};
+    const modelValue = choice.model ?? agent.models[0]?.id ?? '';
+    if (!modelValue) return t('settings.modelCustom');
+    return agentModelOptionLabel(
+      agent.models.find((m) => m.id === modelValue),
+      modelValue,
+    );
+  };
+  const renderAgentModelConfig = (selected: AgentInfo) => {
+    const hasModels =
+      Array.isArray(selected.models) && selected.models.length > 0;
+    const hasReasoning =
+      Array.isArray(selected.reasoningOptions) &&
+      selected.reasoningOptions.length > 0;
+    if (!hasModels && !hasReasoning) return null;
+    const choice = cfg.agentModels?.[selected.id] ?? {};
+    const setChoice = (
+      next: { model?: string; reasoning?: string },
+    ) => {
+      setCfg((c) => {
+        const prev = c.agentModels?.[selected.id] ?? {};
+        return {
+          ...c,
+          agentModels: {
+            ...(c.agentModels ?? {}),
+            [selected.id]: { ...prev, ...next },
+          },
+        };
+      });
+    };
+    const modelValue =
+      choice.model ?? selected.models?.[0]?.id ?? '';
+    const reasoningValue =
+      choice.reasoning ??
+      selected.reasoningOptions?.[0]?.id ?? '';
+    const customActive =
+      hasModels &&
+      shouldShowCustomModelInput(
+        modelValue,
+        selected.models!.map((m) => m.id),
+        agentCustomModelIds.has(selected.id),
+      );
+    const selectValue = customActive
+      ? CUSTOM_MODEL_SENTINEL
+      : modelValue;
+    const modelSource = selected.modelsSource ?? 'fallback';
+    const modelSourceLabel =
+      modelSource === 'live'
+        ? t('settings.modelSourceLive')
+        : t('settings.modelSourceFallback');
+    const modelSourceHint =
+      modelSource === 'live'
+        ? t('settings.modelPickerLiveHint')
+        : t('settings.modelPickerFallbackHint');
+    return (
+      <div className="agent-card-config">
+        {hasModels ? (
+          <>
+            <label className="field">
+              <span className="field-label">
+                {t('settings.modelPicker')}
+                <span
+                  className={`agent-model-source-badge ${modelSource}`}
+                  aria-hidden="true"
+                >
+                  {modelSourceLabel}
+                </span>
+              </span>
+              <div className="agent-model-select-wrap">
+                <select
+                  value={selectValue}
+                  onChange={(e) => {
+                    if (e.target.value === CUSTOM_MODEL_SENTINEL) {
+                      setAgentCustomModelIds((prev) => {
+                        const next = new Set(prev);
+                        next.add(selected.id);
+                        return next;
+                      });
+                      setChoice({ model: '' });
+                    } else {
+                      setAgentCustomModelIds((prev) => {
+                        if (!prev.has(selected.id)) return prev;
+                        const next = new Set(prev);
+                        next.delete(selected.id);
+                        return next;
+                      });
+                      setChoice({ model: e.target.value });
+                    }
+                  }}
+                >
+                  {renderModelOptions(selected.models!)}
+                  <option value={CUSTOM_MODEL_SENTINEL}>
+                    {t('settings.modelCustom')}
+                  </option>
+                </select>
+                <Icon
+                  name="chevron-down"
+                  size={12}
+                  className="agent-model-select-chevron"
+                />
+              </div>
+            </label>
+            <p className="hint agent-model-row-hint">
+              {modelSourceHint}
+            </p>
+          </>
+        ) : null}
+        {customActive ? (
+          <label className="field">
+            <span className="field-label">
+              {t('settings.modelCustomLabel')}
+            </span>
+            <input
+              type="text"
+              value={modelValue}
+              placeholder={t('settings.modelCustomPlaceholder')}
+              onChange={(e) =>
+                setChoice({ model: e.target.value.trim() })
+              }
+            />
+          </label>
+        ) : null}
+        {hasReasoning ? (
+          <label className="field">
+            <span className="field-label">
+              {t('settings.reasoningPicker')}
+            </span>
+            <div className="agent-model-select-wrap">
+              <select
+                value={reasoningValue}
+                onChange={(e) =>
+                  setChoice({ reasoning: e.target.value })
+                }
+              >
+                {selected.reasoningOptions!.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+              <Icon
+                name="chevron-down"
+                size={12}
+                className="agent-model-select-chevron"
+              />
+            </div>
+          </label>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -2352,6 +2515,7 @@ export function SettingsDialog({
                             active && agentTestState.status === 'running';
                           const description = AGENT_SHORT_DESCRIPTIONS[a.id];
                           const agentName = displayAgentName(a);
+                          const modelSummary = agentModelSummary(a);
                           const versionLabel = cleanAgentVersionLabel(
                             a.name,
                             a.version,
@@ -2364,91 +2528,100 @@ export function SettingsDialog({
                                 (active ? ' active' : '')
                               }
                             >
-                              <button
-                                type="button"
-                                className="agent-card-select"
-                                onClick={() => {
-                                  trackSettingsLocalCliClick(analytics.track, {
-                                    page_name: 'settings',
-                                    area: 'configure_execution_mode_local_cli',
-                                    element: 'cli_provider',
-                                    cli_provider_id: agentIdToTracking(a.id),
-                                    install_status: 'installed',
-                                  });
-                                  setCfg((c) => ({ ...c, agentId: a.id }));
-                                }}
-                                aria-pressed={active}
-                              >
-                                <AgentIcon id={a.id} size={32} />
-                                <div className="agent-card-body">
-                                  <div className="agent-card-name">
-                                    <span>{agentName}</span>
-                                    {description ? (
-                                      <>
-                                        <span
-                                          className="agent-card-name-divider"
-                                          aria-hidden="true"
-                                        >
-                                          ·
-                                        </span>
-                                        <span className="agent-card-tagline">
-                                          {description}
-                                        </span>
-                                      </>
-                                    ) : null}
-                                  </div>
-                                  <div className="agent-card-meta">
-                                    {a.authStatus === 'missing' ? (
-                                      <span title={a.authMessage ?? a.path ?? ''}>
-                                        {t('settings.agentAuthRequired')}
-                                      </span>
-                                    ) : a.authStatus === 'unknown' ? (
-                                      <span title={a.authMessage ?? a.path ?? ''}>
-                                        {t('settings.agentAuthUnknown')}
-                                      </span>
-                                    ) : versionLabel ? (
-                                      <span title={a.path ?? ''}>
-                                        {versionLabel}
-                                      </span>
-                                    ) : (
-                                      <span title={a.path ?? ''}>
-                                        {t('common.installed')}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              </button>
-                              {a.id === 'amr' ? (
-                                <AmrLoginPill
-                                  className="amr-account-control"
-                                  hideSignedOutStatus
-                                />
-                              ) : null}
-                              {active ? (
+                              <div className="agent-card-main">
                                 <button
                                   type="button"
-                                  className={
-                                    'ghost icon-btn settings-test-btn agent-card-test-btn' +
-                                    (running ? ' loading' : '')
-                                  }
-                                  onClick={() => void handleTestAgent()}
-                                  disabled={running}
-                                  title={t('settings.testTitle')}
+                                  className="agent-card-select"
+                                  onClick={() => {
+                                    trackSettingsLocalCliClick(analytics.track, {
+                                      page_name: 'settings',
+                                      area: 'configure_execution_mode_local_cli',
+                                      element: 'cli_provider',
+                                      cli_provider_id: agentIdToTracking(a.id),
+                                      install_status: 'installed',
+                                    });
+                                    setCfg((c) => ({ ...c, agentId: a.id }));
+                                  }}
+                                  aria-pressed={active}
                                 >
-                                  {running ? (
-                                    <>
-                                      <Icon
-                                        name="spinner"
-                                        size={13}
-                                        className="icon-spin"
-                                      />
-                                      <span>{t('settings.test')}</span>
-                                    </>
-                                  ) : (
-                                    t('settings.test')
-                                  )}
+                                  <AgentIcon id={a.id} size={32} />
+                                  <div className="agent-card-body">
+                                    <div className="agent-card-name">
+                                      <span>{agentName}</span>
+                                      {description ? (
+                                        <>
+                                          <span
+                                            className="agent-card-name-divider"
+                                            aria-hidden="true"
+                                          >
+                                            ·
+                                          </span>
+                                          <span className="agent-card-tagline">
+                                            {description}
+                                          </span>
+                                        </>
+                                      ) : null}
+                                    </div>
+                                    <div className="agent-card-meta">
+                                      {a.authStatus === 'missing' ? (
+                                        <span title={a.authMessage ?? a.path ?? ''}>
+                                          {t('settings.agentAuthRequired')}
+                                        </span>
+                                      ) : a.authStatus === 'unknown' ? (
+                                        <span title={a.authMessage ?? a.path ?? ''}>
+                                          {t('settings.agentAuthUnknown')}
+                                        </span>
+                                      ) : versionLabel ? (
+                                        <span title={a.path ?? ''}>
+                                          {versionLabel}
+                                        </span>
+                                      ) : (
+                                        <span title={a.path ?? ''}>
+                                          {t('common.installed')}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {!active && modelSummary ? (
+                                      <div className="agent-card-model-summary">
+                                        <span>{t('settings.modelPicker')}</span>
+                                        <strong>{modelSummary}</strong>
+                                      </div>
+                                    ) : null}
+                                  </div>
                                 </button>
-                              ) : null}
+                                {a.id === 'amr' ? (
+                                  <AmrLoginPill
+                                    className="amr-account-control"
+                                    hideSignedOutStatus
+                                  />
+                                ) : null}
+                                {active ? (
+                                  <button
+                                    type="button"
+                                    className={
+                                      'ghost icon-btn settings-test-btn agent-card-test-btn' +
+                                      (running ? ' loading' : '')
+                                    }
+                                    onClick={() => void handleTestAgent()}
+                                    disabled={running}
+                                    title={t('settings.testTitle')}
+                                  >
+                                    {running ? (
+                                      <>
+                                        <Icon
+                                          name="spinner"
+                                          size={13}
+                                          className="icon-spin"
+                                        />
+                                        <span>{t('settings.test')}</span>
+                                      </>
+                                    ) : (
+                                      t('settings.test')
+                                    )}
+                                  </button>
+                                ) : null}
+                              </div>
+                              {active ? renderAgentModelConfig(a) : null}
                             </div>
                           );
                           if (active && agentTestState.status !== 'idle') {
@@ -2548,156 +2721,6 @@ export function SettingsDialog({
                       </div>
                     )}
                   </div>
-              {(() => {
-                const selected = agents.find(
-                  (a) => a.id === cfg.agentId && a.available,
-                );
-                if (!selected) return null;
-                const hasModels =
-                  Array.isArray(selected.models) && selected.models.length > 0;
-                const hasReasoning =
-                  Array.isArray(selected.reasoningOptions) &&
-                  selected.reasoningOptions.length > 0;
-                if (!hasModels && !hasReasoning) return null;
-                const choice = cfg.agentModels?.[selected.id] ?? {};
-                const setChoice = (
-                  next: { model?: string; reasoning?: string },
-                ) => {
-                  setCfg((c) => {
-                    const prev = c.agentModels?.[selected.id] ?? {};
-                    return {
-                      ...c,
-                      agentModels: {
-                        ...(c.agentModels ?? {}),
-                        [selected.id]: { ...prev, ...next },
-                      },
-                    };
-                  });
-                };
-                const modelValue =
-                  choice.model ?? selected.models?.[0]?.id ?? '';
-                const reasoningValue =
-                  choice.reasoning ??
-                  selected.reasoningOptions?.[0]?.id ?? '';
-                const customActive =
-                  hasModels &&
-                  shouldShowCustomModelInput(
-                    modelValue,
-                    selected.models!.map((m) => m.id),
-                    agentCustomModelIds.has(selected.id),
-                  );
-                const selectValue = customActive
-                  ? CUSTOM_MODEL_SENTINEL
-                  : modelValue;
-                const modelSource = selected.modelsSource ?? 'fallback';
-                const modelSourceLabel =
-                  modelSource === 'live'
-                    ? t('settings.modelSourceLive')
-                    : t('settings.modelSourceFallback');
-                const modelSourceHint =
-                  modelSource === 'live'
-                    ? t('settings.modelPickerLiveHint')
-                    : t('settings.modelPickerFallbackHint');
-                return (
-                  <div className="agent-model-row">
-                    <div className="agent-model-row-head">
-                      {t('settings.agentModelHead')}{' '}
-                      <strong>{displayAgentName(selected)}</strong>
-                    </div>
-                    {hasModels ? (
-                      <>
-                        <label className="field">
-                          <span className="field-label">
-                            {t('settings.modelPicker')}
-                            <span
-                              className={`agent-model-source-badge ${modelSource}`}
-                            >
-                              {modelSourceLabel}
-                            </span>
-                          </span>
-                          <div className="agent-model-select-wrap">
-                            <select
-                              value={selectValue}
-                              onChange={(e) => {
-                                if (e.target.value === CUSTOM_MODEL_SENTINEL) {
-                                  setAgentCustomModelIds((prev) => {
-                                    const next = new Set(prev);
-                                    next.add(selected.id);
-                                    return next;
-                                  });
-                                  setChoice({ model: '' });
-                                } else {
-                                  setAgentCustomModelIds((prev) => {
-                                    if (!prev.has(selected.id)) return prev;
-                                    const next = new Set(prev);
-                                    next.delete(selected.id);
-                                    return next;
-                                  });
-                                  setChoice({ model: e.target.value });
-                                }
-                              }}
-                            >
-                              {renderModelOptions(selected.models!)}
-                              <option value={CUSTOM_MODEL_SENTINEL}>
-                                {t('settings.modelCustom')}
-                              </option>
-                            </select>
-                            <Icon
-                              name="chevron-down"
-                              size={12}
-                              className="agent-model-select-chevron"
-                            />
-                          </div>
-                        </label>
-                        <p className="hint agent-model-row-hint">
-                          {modelSourceHint}
-                        </p>
-                      </>
-                    ) : null}
-                    {customActive ? (
-                      <label className="field">
-                        <span className="field-label">
-                          {t('settings.modelCustomLabel')}
-                        </span>
-                        <input
-                          type="text"
-                          value={modelValue}
-                          placeholder={t('settings.modelCustomPlaceholder')}
-                          onChange={(e) =>
-                            setChoice({ model: e.target.value.trim() })
-                          }
-                        />
-                      </label>
-                    ) : null}
-                    {hasReasoning ? (
-                      <label className="field">
-                        <span className="field-label">
-                          {t('settings.reasoningPicker')}
-                        </span>
-                        <div className="agent-model-select-wrap">
-                          <select
-                            value={reasoningValue}
-                            onChange={(e) =>
-                              setChoice({ reasoning: e.target.value })
-                            }
-                          >
-                            {selected.reasoningOptions!.map((r) => (
-                              <option key={r.id} value={r.id}>
-                                {r.label}
-                              </option>
-                            ))}
-                          </select>
-                          <Icon
-                            name="chevron-down"
-                            size={12}
-                            className="agent-model-select-chevron"
-                          />
-                        </div>
-                      </label>
-                    ) : null}
-                  </div>
-                );
-              })()}
                   {unavailableAgents.length > 0 ? (
                     <details
                       className="agent-install-collapse"

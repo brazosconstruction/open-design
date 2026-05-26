@@ -4,15 +4,23 @@ import { dirname, join } from "node:path";
 import { hashJson, hashPath, ToolPackCache } from "../cache.js";
 import type { ToolPackConfig } from "../config.js";
 import { copyBundledResourceTrees, winResources } from "../resources.js";
-import { copyOptionalVelaCliBinary, resolveOptionalVelaCliBinary } from "../vela-cli.js";
+import {
+  copyOptionalVelaCliBinary,
+  resolveOptionalVelaCliBinary,
+  resolveOptionalVelaCliOpenCodeCompanionTree,
+} from "../vela-cli.js";
 import type { WinPaths, ResourceTreeCacheMetadata } from "./types.js";
 
-const RESOURCE_TREE_CACHE_SCHEMA_VERSION = 3;
+const RESOURCE_TREE_CACHE_SCHEMA_VERSION = 4;
 
 async function createResourceTreeCacheKey(config: ToolPackConfig): Promise<string> {
   const velaCliBin = await resolveOptionalVelaCliBinary({
     requireBundled: config.requireVelaCli,
   });
+  const velaOpenCodeCompanion =
+    velaCliBin == null
+      ? null
+      : await resolveOptionalVelaCliOpenCodeCompanionTree(velaCliBin);
   return hashJson({
     assetsCommunityPets: await hashPath(join(config.workspaceRoot, "assets", "community-pets")),
     assetsFrames: await hashPath(join(config.workspaceRoot, "assets", "frames")),
@@ -27,6 +35,9 @@ async function createResourceTreeCacheKey(config: ToolPackConfig): Promise<strin
     skills: await hashPath(join(config.workspaceRoot, "skills")),
     requireVelaCli: config.requireVelaCli,
     velaCliBin: velaCliBin ? await hashPath(velaCliBin) : null,
+    velaOpenCodeCompanion: velaOpenCodeCompanion
+      ? await hashPath(velaOpenCodeCompanion)
+      : null,
   });
 }
 

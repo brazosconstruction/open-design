@@ -1057,9 +1057,14 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     expect(screen.getByText(en['settings.agentInstall.pathHint'])).toBeTruthy();
 
     fireEvent.click(codexCard);
-    const modelHead = screen.getByText(/Model for:/);
+    const selectedCard = codexCard.closest('.agent-card') as HTMLElement;
     expect(
-      modelHead.compareDocumentPosition(installGroupSummary) &
+      within(selectedCard).getByRole('combobox', {
+        name: en['settings.modelPicker'],
+      }),
+    ).toBeTruthy();
+    expect(
+      selectedCard.compareDocumentPosition(installGroupSummary) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     await waitForPersist(
@@ -1092,7 +1097,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI/i }));
     expect(screen.getByText('Live from CLI')).toBeTruthy();
     expect(
-      screen.getByText(/Models were refreshed from the installed CLI/i),
+      screen.getByText(/Model list comes from this CLI/i),
     ).toBeTruthy();
   });
 
