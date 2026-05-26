@@ -55,15 +55,15 @@ function normalizeMarkdownText(value: string): string {
   return value.replace(/\r\n?/g, '\n');
 }
 
-function contentDigest(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
+function normalizeSourceRefForIdentity(sourceRef: string): string {
+  return sourceRef.replace(/\\/g, '/').trim();
 }
 
-function candidateFingerprint(sourceRef: string, contentOrKind: string): string {
+function candidateFingerprint(sourceKind: SkillPluginCandidateSourceKind, sourceRef: string): string {
   return createHash('sha256')
-    .update(sourceRef)
+    .update(sourceKind)
     .update('\0')
-    .update(contentOrKind)
+    .update(normalizeSourceRefForIdentity(sourceRef))
     .digest('hex');
 }
 
@@ -122,7 +122,7 @@ function markdownCandidate(
     confidence: explicitSkillMd ? 0.96 : 0.72,
     title,
     ...(description ? { description } : {}),
-    fingerprint: candidateFingerprint(sourceRef, contentDigest(normalized)),
+    fingerprint: candidateFingerprint(sourceKind, sourceRef),
     draftInput: {
       artifactKind: explicitSkillMd ? 'skill-md' : 'markdown-skill-doc',
       source: sourceRef,
@@ -172,7 +172,7 @@ function repoCandidate(ref: string): SkillPluginCandidateInput | null {
     confidence: ref.toLowerCase().includes('skill.md') || ref.toLowerCase().includes('open-design.json') ? 0.84 : 0.68,
     title: repoTitle,
     description: 'Repository link contains plugin-like Open Design files.',
-    fingerprint: candidateFingerprint(ref, 'repo-plugin-link'),
+    fingerprint: candidateFingerprint('repo-link', ref),
     draftInput: {
       artifactKind: 'repo-plugin',
       source: ref,
@@ -304,22 +304,12 @@ export function persistSkillPluginCandidates(
         WHEN skill_plugin_candidates.status = 'dismissed' THEN skill_plugin_candidates.confidence
         ELSE MAX(skill_plugin_candidates.confidence, excluded.confidence)
       END,
-      title = CASE
-        WHEN skill_plugin_candidates.status = 'dismissed' THEN skill_plugin_candidates.title
-        ELSE COALESCE(skill_plugin_candidates.title, excluded.title)
-      END,
-      description = CASE
-        WHEN skill_plugin_candidates.status = 'dismissed' THEN skill_plugin_candidates.description
-        ELSE COALESCE(skill_plugin_candidates.description, excluded.description)
-      END,
-      draft_input_json = CASE
-        WHEN skill_plugin_candidates.status = 'dismissed' THEN skill_plugin_candidates.draft_input_json
-        ELSE excluded.draft_input_json
-      END,
-      updated_at = CASE
-        WHEN skill_plugin_candidates.status = 'dismissed' THEN skill_plugin_candidates.updated_at
-        ELSE excluded.updated_at
-      END
+      source_ref = excluded.source_ref,
+      provenance = excluded.provenance,
+      title = excluded.title,
+      description = excluded.description,
+      draft_input_json = excluded.draft_input_json,
+      updated_at = excluded.updated_at
   `);
   const select = db.prepare(`
     SELECT id, project_id AS projectId, run_id AS runId, source_kind AS sourceKind,

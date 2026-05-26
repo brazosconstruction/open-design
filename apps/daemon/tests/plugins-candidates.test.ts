@@ -144,4 +144,65 @@ describe('skill plugin candidate persistence', () => {
 
     expect(listSkillPluginCandidates(db, 'project-a')).toEqual([]);
   });
+
+  it('keeps an edited source dismissed without creating duplicate rows', async () => {
+    const skillPath = path.join(tmpRoot, 'SKILL.md');
+    await writeFile(
+      skillPath,
+      `---\nname: original-skill\ndescription: Original reusable workflow.\n---\n# Original Skill\n\nUse this skill when drafting copy.\n`,
+      'utf8',
+    );
+
+    const [firstCandidate] = await detectSkillPluginCandidates({
+      projectRoot: tmpRoot,
+      attachments: ['SKILL.md'],
+    });
+    expect(firstCandidate).toBeTruthy();
+
+    const [persisted] = persistSkillPluginCandidates(db, {
+      projectId: 'project-a',
+      runId: 'run-1',
+      candidates: [firstCandidate!],
+      now: 100,
+    });
+    expect(persisted).toBeTruthy();
+
+    dismissSkillPluginCandidate(db, {
+      projectId: 'project-a',
+      candidateId: persisted!.id,
+      now: 200,
+    });
+
+    await writeFile(
+      skillPath,
+      `---\nname: edited-skill\ndescription: Edited reusable workflow.\n---\n# Edited Skill\n\nUse this skill when revising launch copy.\n`,
+      'utf8',
+    );
+
+    const [editedCandidate] = await detectSkillPluginCandidates({
+      projectRoot: tmpRoot,
+      attachments: ['SKILL.md'],
+    });
+    expect(editedCandidate).toBeTruthy();
+    expect(editedCandidate!.fingerprint).toBe(firstCandidate!.fingerprint);
+
+    const activeRows = persistSkillPluginCandidates(db, {
+      projectId: 'project-a',
+      runId: 'run-2',
+      candidates: [editedCandidate!],
+      now: 300,
+    });
+
+    expect(activeRows).toEqual([]);
+    expect(listSkillPluginCandidates(db, 'project-a')).toEqual([]);
+    expect(listSkillPluginCandidates(db, 'project-a', { includeDismissed: true })).toMatchObject([
+      {
+        id: persisted!.id,
+        status: 'dismissed',
+        title: 'edited-skill',
+        description: 'Edited reusable workflow.',
+        fingerprint: firstCandidate!.fingerprint,
+      },
+    ]);
+  });
 });
