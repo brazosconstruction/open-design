@@ -11,6 +11,7 @@ import { ensureWorkspaceBuildArtifacts } from "../src/workspace-build.js";
 const PACKAGE_DIRS = [
   "packages/contracts",
   "packages/registry-protocol",
+  "packages/launcher-proto",
   "packages/sidecar-proto",
   "packages/sidecar",
   "packages/platform",
@@ -28,6 +29,8 @@ const OUTPUT_FILES = [
   "packages/contracts/dist/index.d.ts",
   "packages/registry-protocol/dist/index.mjs",
   "packages/registry-protocol/dist/index.d.ts",
+  "packages/launcher-proto/dist/index.mjs",
+  "packages/launcher-proto/dist/index.d.ts",
   "packages/sidecar-proto/dist/index.mjs",
   "packages/sidecar-proto/dist/index.d.ts",
   "packages/sidecar/dist/index.mjs",

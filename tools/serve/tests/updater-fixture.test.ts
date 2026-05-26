@@ -69,6 +69,39 @@ describe("updater fixture server", () => {
     }
   });
 
+  it("serves Windows launcher payload metadata for the updater flow", async () => {
+    const server = await startUpdaterFixtureServer({
+      artifactBody: "fixture payload",
+      artifactKind: "payload",
+      artifactName: "Open Design Payload.7z",
+      channel: "beta",
+      platform: "win",
+      version: "2.0.0-beta-nightly.2",
+    });
+    try {
+      const metadataResponse = await fetch(server.info.metadataUrl);
+      expect(metadataResponse.ok).toBe(true);
+      const metadata = await metadataResponse.json() as {
+        platforms?: { win?: { arch?: string; artifacts?: { payload?: { contentType?: string; name?: string; sha256Url?: string; url?: string } } } };
+      };
+      expect(server.info.artifactKind).toBe("payload");
+      expect(metadata.platforms?.win?.arch).toBe("x64");
+      expect(metadata.platforms?.win?.artifacts?.payload?.contentType).toBe("application/x-7z-compressed");
+      expect(metadata.platforms?.win?.artifacts?.payload?.name).toBe("Open Design Payload.7z");
+      expect(server.info.artifactUrl).toContain("Open%20Design%20Payload.7z");
+      expect(metadata.platforms?.win?.artifacts?.payload?.url).toBe(server.info.artifactUrl);
+      expect(metadata.platforms?.win?.artifacts?.payload?.sha256Url).toBe(server.info.checksumUrl);
+
+      const artifact = await fetch(server.info.artifactUrl);
+      expect(await artifact.text()).toBe("fixture payload");
+
+      const checksum = await fetch(server.info.checksumUrl);
+      expect(await checksum.text()).toContain(server.info.sha256);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("serves artifact byte ranges for resumable download validation", async () => {
     const server = await startUpdaterFixtureServer({
       artifactBody: "fixture artifact",

@@ -13,7 +13,10 @@ import {
   WIN_PREBUNDLED_WEB_SIDECAR_RELATIVE_PATH,
   shouldUseWinStandalonePrebundle,
 } from "../win-prebundle.js";
-import { buildCustomWinNsisInstaller } from "./custom-installer.js";
+import {
+  buildCustomWinNsisInstaller,
+  buildWinLauncherInstallRootArtifacts,
+} from "./custom-installer.js";
 import {
   ELECTRON_BUILDER_ASAR,
   ELECTRON_BUILDER_BUILD_DEPENDENCIES_FROM_SOURCE,
@@ -34,6 +37,7 @@ import {
 import { ensureNsisPersianLanguageAlias, writeNsisInclude } from "./nsis.js";
 import { sanitizeNamespace } from "./paths.js";
 import { resolveWinTargets } from "./report.js";
+import { createWinLauncherBuiltAppManifest } from "./launcher-layout.js";
 import type { ResourceTreeResult } from "./resources.js";
 import type {
   ElectronBuilderDirCacheMetadata,
@@ -337,7 +341,10 @@ export async function runElectronBuilder(
     unpackedRoot: cachedUnpackedRoot,
     webStandaloneHookAuditPath: (await pathExists(paths.webStandaloneHookAuditPath)) ? paths.webStandaloneHookAuditPath : null,
   });
+  const launcherBuiltApp = await materializeCachedUnpackedForInstaller(cachedUnpackedRoot, paths, packagedVersion);
+  const launcherLayout = await buildWinLauncherInstallRootArtifacts(config, paths, launcherBuiltApp);
+  await writeBuiltAppManifest(paths, createWinLauncherBuiltAppManifest(launcherBuiltApp, launcherLayout));
   if (config.to === "nsis" || config.to === "all") {
-    await buildCustomWinNsisInstaller(config, paths, await materializeCachedUnpackedForInstaller(cachedUnpackedRoot, paths, packagedVersion));
+    await buildCustomWinNsisInstaller(config, paths, launcherLayout);
   }
 }

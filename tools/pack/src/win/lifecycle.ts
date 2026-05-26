@@ -1,5 +1,5 @@
-import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { lstat, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   APP_KEYS,
@@ -42,7 +42,13 @@ import {
   resolveWinProductNamespaceRoot,
   resolveWinProductUserDataRoot,
 } from "./paths.js";
-import { cleanupWinRegistryResidues, queryWinRegistryEntries, resolveWinRegisteredPaths } from "./registry.js";
+import { resolveWinInstallIdentity } from "./identity.js";
+import {
+  cleanupWinRegistryResidues,
+  queryWinRegistryEntries,
+  queryWinRegistryResiduePaths,
+  resolveWinRegisteredPaths,
+} from "./registry.js";
 import type {
   WinCleanupResult,
   WinInspectResult,
@@ -59,6 +65,12 @@ import type {
 
 const PACKAGED_CONFIG_PATH_ENV = "OD_PACKAGED_CONFIG_PATH";
 const UPDATE_ACTION_TIMEOUT_MS = 10 * 60 * 1000;
+
+export type WinStartTarget = {
+  configPath: string | null;
+  executablePath: string;
+  source: "built" | "installed";
+};
 
 async function desktopStamp(config: ToolPackConfig): Promise<SidecarStamp> {
   const endpoint = createControlEndpoint(
@@ -119,6 +131,41 @@ function installArgs(config: ToolPackConfig, paths: WinPaths): string[] {
   return [...(config.silent ? ["/S"] : []), `/D=${paths.installDir}`];
 }
 
+function uninstallArgs(config: ToolPackConfig): string[] {
+  return ["/currentuser", ...(config.silent ? ["/S"] : [])];
+}
+
+function launcherInstallRootLockPath(installDir: string): string {
+  return join(installDir, "state", "lock");
+}
+
+async function assertNoLauncherInstallRootLock(installDir: string, action: string): Promise<void> {
+  const lockPath = launcherInstallRootLockPath(installDir);
+  if (await pathExists(lockPath)) throw new Error(`cannot ${action}; launcher install root lock exists at ${lockPath}`);
+}
+
+export async function removePartialWinInstallRootIfUnlocked(paths: Pick<WinPaths, "installDir" | "uninstallerPath">): Promise<boolean> {
+  if (await pathExists(paths.uninstallerPath)) return false;
+  if (!(await pathExists(paths.installDir))) return false;
+  await assertNoLauncherInstallRootLock(paths.installDir, "cleanup launcher root");
+  await removeTree(paths.installDir);
+  return true;
+}
+
+export async function removeWinShortcutResidues(paths: Pick<WinPaths, "publicDesktopShortcutPath" | "startMenuShortcutPath" | "userDesktopShortcutPath">): Promise<void> {
+  await Promise.all([
+    paths.publicDesktopShortcutPath,
+    paths.startMenuShortcutPath,
+    paths.userDesktopShortcutPath,
+  ].map(async (shortcutPath) => {
+    try {
+      await rm(shortcutPath, { force: true });
+    } catch {
+      // Public desktop entries can require elevation; residue observation will still report failures.
+    }
+  }));
+}
+
 async function writeJsonMarker(filePath: string, payload: Record<string, unknown>): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
@@ -170,7 +217,7 @@ async function observeWinResidues(config: ToolPackConfig, paths = resolveWinPath
     productNamespaceRootExists: await pathExists(resolveWinProductNamespaceRoot(config)),
     productUserDataRootExists: await pathExists(resolveWinProductUserDataRoot()),
     publicDesktopShortcutExists: await pathExists(paths.publicDesktopShortcutPath),
-    registryResidues: (await queryWinRegistryEntries(paths, config)).map((entry) => entry.keyPath),
+    registryResidues: await queryWinRegistryResiduePaths(paths, config),
     runtimeNamespaceRootExists: await pathExists(config.roots.runtime.namespaceRoot),
     startMenuShortcutExists: await pathExists(paths.startMenuShortcutPath),
     uninstallerExists: await pathExists(paths.uninstallerPath),
@@ -182,6 +229,7 @@ export async function installPackedWinApp(config: ToolPackConfig): Promise<WinIn
   const paths = resolveWinPaths(config);
   const registeredPaths = await resolveWinRegisteredPaths(config, paths);
   if (!(await pathExists(paths.setupPath))) throw new Error(`no windows installer found at ${paths.setupPath}; run tools-pack win build first`);
+  await assertNoLauncherInstallRootLock(registeredPaths.installDir, "install over existing launcher root");
   if (await pathExists(registeredPaths.uninstallerPath)) {
     await uninstallPackedWinApp(config);
   } else {
@@ -191,12 +239,13 @@ export async function installPackedWinApp(config: ToolPackConfig): Promise<WinIn
   await runTimed(paths.installTimingPath, "install", async () => {
     await invokeNsis(paths, paths.setupPath, installArgs(config, paths), "install");
   });
-  if (!(await pathExists(paths.installedExePath))) throw new Error(`installer completed but executable is missing at ${paths.installedExePath}`);
-  const registryEntries = await queryWinRegistryEntries(paths, config);
-  const installPayload = await collectInstallPayloadReport(paths);
+  const installedPaths = await resolveWinRegisteredPaths(config, paths);
+  if (!(await pathExists(installedPaths.installedExePath))) throw new Error(`installer completed but executable is missing at ${installedPaths.installedExePath}`);
+  const registryEntries = await queryWinRegistryEntries(installedPaths, config);
+  const installPayload = await collectInstallPayloadReport(installedPaths);
   await writeJsonMarker(paths.installMarkerPath, {
     installedAt: new Date().toISOString(),
-    installDir: paths.installDir,
+    installDir: installedPaths.installDir,
     installPayload,
     namespace: config.namespace,
     registryEntries: registryEntries.map((entry) => entry.keyPath),
@@ -204,7 +253,7 @@ export async function installPackedWinApp(config: ToolPackConfig): Promise<WinIn
   return {
     desktopShortcutExists: await pathExists(paths.userDesktopShortcutPath),
     desktopShortcutPath: paths.userDesktopShortcutPath,
-    installDir: paths.installDir,
+    installDir: installedPaths.installDir,
     installerPath: paths.setupPath,
     installPayload,
     markerPath: paths.installMarkerPath,
@@ -214,21 +263,84 @@ export async function installPackedWinApp(config: ToolPackConfig): Promise<WinIn
     startMenuShortcutExists: await pathExists(paths.startMenuShortcutPath),
     startMenuShortcutPath: paths.startMenuShortcutPath,
     timingPath: paths.installTimingPath,
-    uninstallerPath: paths.uninstallerPath,
+    uninstallerPath: installedPaths.uninstallerPath,
   };
 }
 
-async function resolveStartTarget(config: ToolPackConfig): Promise<{ configPath: string | null; executablePath: string; source: "built" | "installed" }> {
+function builtLauncherExecutablePath(config: ToolPackConfig, paths: WinPaths): string {
+  return join(paths.launcherInstallRoot, resolveWinInstallIdentity(config).exeName);
+}
+
+function containsPath(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return rel === "" || (rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value != null && !Array.isArray(value);
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+async function isNormalFile(path: string): Promise<boolean> {
+  const entry = await lstat(path).catch(() => null);
+  return entry != null && entry.isFile() && !entry.isSymbolicLink();
+}
+
+async function runtimePayloadExecutablePath(installRoot: string): Promise<string | null> {
+  const runtimeConfigPath = join(installRoot, "runtime.json");
+  if (!(await isNormalFile(runtimeConfigPath))) return null;
+
+  let runtime: unknown;
+  try {
+    runtime = JSON.parse(await readFile(runtimeConfigPath, "utf8")) as unknown;
+  } catch {
+    return null;
+  }
+  if (!isRecord(runtime) || !isRecord(runtime.active) || !isRecord(runtime.active.entry)) return null;
+
+  const activeRoot = stringField(runtime.active, "root");
+  const executable = stringField(runtime.active.entry, "executable");
+  if (activeRoot == null || executable == null) return null;
+
+  const payloadExecutablePath = resolve(installRoot, activeRoot, executable);
+  return containsPath(installRoot, payloadExecutablePath) ? payloadExecutablePath : null;
+}
+
+async function hasCompleteBuiltLauncherRoot(installRoot: string, launcherExecutablePath: string): Promise<boolean> {
+  if (!(await isNormalFile(launcherExecutablePath))) return false;
+  const requiredFiles = [
+    join(installRoot, "install.json"),
+    join(installRoot, "launcher.json"),
+    join(installRoot, "runtime.json"),
+    join(installRoot, "lib", "7z", "7z.exe"),
+    join(installRoot, "lib", "7z", "7z.dll"),
+  ];
+  for (const requiredFile of requiredFiles) {
+    if (!(await isNormalFile(requiredFile))) return false;
+  }
+
+  const payloadExecutablePath = await runtimePayloadExecutablePath(installRoot);
+  return payloadExecutablePath != null && await isNormalFile(payloadExecutablePath);
+}
+
+export async function resolveWinStartTarget(config: ToolPackConfig): Promise<WinStartTarget> {
   const paths = resolveWinPaths(config);
-  if (await pathExists(paths.installedExePath)) return { configPath: null, executablePath: paths.installedExePath, source: "installed" };
+  const registeredPaths = await resolveWinRegisteredPaths(config, paths);
+  if (await isNormalFile(registeredPaths.installedExePath)) return { configPath: null, executablePath: registeredPaths.installedExePath, source: "installed" };
+  const launcherExecutablePath = builtLauncherExecutablePath(config, paths);
+  if (await hasCompleteBuiltLauncherRoot(paths.launcherInstallRoot, launcherExecutablePath)) return { configPath: null, executablePath: launcherExecutablePath, source: "built" };
   const builtManifest = await readBuiltAppManifest(paths, { requireExecutable: true });
   if (builtManifest != null) return { configPath: builtManifest.configPath, executablePath: builtManifest.executablePath, source: "built" };
-  if (await pathExists(paths.unpackedExePath)) return { configPath: null, executablePath: paths.unpackedExePath, source: "built" };
+  if (await isNormalFile(paths.unpackedExePath)) return { configPath: null, executablePath: paths.unpackedExePath, source: "built" };
   throw new Error(`no windows app executable found for namespace=${config.namespace}; run tools-pack win build first or tools-pack win install after building an NSIS installer`);
 }
 
 export async function startPackedWinApp(config: ToolPackConfig): Promise<WinStartResult> {
-  const target = await resolveStartTarget(config);
+  const target = await resolveWinStartTarget(config);
   const stamp = await desktopStamp(config);
   const logPath = desktopLogPath(config);
   await mkdir(dirname(logPath), { recursive: true });
@@ -321,13 +433,16 @@ export async function uninstallPackedWinApp(config: ToolPackConfig): Promise<Win
   const paths = resolveWinPaths(config);
   const registeredPaths = await resolveWinRegisteredPaths(config, paths);
   const stop = await stopPackedWinApp(config);
+  await assertNoLauncherInstallRootLock(registeredPaths.installDir, "uninstall launcher root");
   if (await pathExists(registeredPaths.uninstallerPath)) {
     await runTimed(paths.uninstallTimingPath, "uninstall", async () => {
-      await invokeNsis(paths, registeredPaths.uninstallerPath, config.silent ? ["/S"] : [], "uninstall");
+      await invokeNsis(paths, registeredPaths.uninstallerPath, uninstallArgs(config), "uninstall");
     });
+    await assertNoLauncherInstallRootLock(registeredPaths.installDir, "finish uninstall cleanup");
   }
   await removeTree(registeredPaths.installDir);
   const registryResiduesRemoved = await cleanupWinRegistryResidues(registeredPaths, config);
+  await removeWinShortcutResidues(paths);
   const removalPlan = await createWinRemovalPlan(config);
   await writeJsonMarker(paths.uninstallMarkerPath, {
     namespace: config.namespace,
@@ -367,10 +482,12 @@ export async function cleanupPackedWinNamespace(config: ToolPackConfig): Promise
     await uninstallPackedWinApp(config);
   }
   const stop = await stopPackedWinApp(config);
+  const removedPartialInstallRoot = await removePartialWinInstallRootIfUnlocked(registeredPaths);
   const removedOutputRoot = await pathExists(config.roots.output.namespaceRoot);
   const removedRuntimeNamespaceRoot = await pathExists(config.roots.runtime.namespaceRoot);
   const removedProductUserDataRoot = removalPlan.some((target) => target.scope === "product-user-data" && target.willRemove && target.exists);
   await cleanupWinRegistryResidues(registeredPaths, config);
+  await removeWinShortcutResidues(paths);
   for (const target of removalPlan) {
     if (target.scope === "product-user-data" && target.willRemove) await removeTree(target.path);
   }
@@ -379,6 +496,7 @@ export async function cleanupPackedWinNamespace(config: ToolPackConfig): Promise
   return {
     namespace: config.namespace,
     removedOutputRoot,
+    removedPartialInstallRoot,
     removedProductUserDataRoot,
     removedRuntimeNamespaceRoot,
     removalPlan,
@@ -391,13 +509,18 @@ export async function listPackedWinNamespaces(config: ToolPackConfig): Promise<W
   const paths = resolveWinPaths(config);
   const registeredPaths = await resolveWinRegisteredPaths(config, paths);
   const registryEntries = await queryWinRegistryEntries(registeredPaths, config);
+  const registryResidues = await queryWinRegistryResiduePaths(registeredPaths, config);
   const productNamespaceRoot = resolveWinProductNamespaceRoot(config);
   const productUserDataRoot = resolveWinProductUserDataRoot();
   const builtManifest = await readBuiltAppManifest(paths, { requireExecutable: true });
+  const launcherExecutablePath = builtLauncherExecutablePath(config, paths);
+  const builtLauncherReady = await hasCompleteBuiltLauncherRoot(paths.launcherInstallRoot, launcherExecutablePath);
+  const fallbackBuiltExecutablePath = builtManifest?.executablePath ?? ((await isNormalFile(paths.unpackedExePath)) ? paths.unpackedExePath : null);
+  const builtExecutablePath = builtLauncherReady ? launcherExecutablePath : fallbackBuiltExecutablePath;
   return {
     current: {
-      builtExecutableExists: builtManifest != null || await pathExists(paths.unpackedExePath),
-      builtExecutablePath: builtManifest?.executablePath ?? ((await pathExists(paths.unpackedExePath)) ? paths.unpackedExePath : null),
+      builtExecutableExists: builtExecutablePath != null,
+      builtExecutablePath,
       builtManifestPath: paths.builtManifestPath,
       installDir: registeredPaths.installDir,
       installedExeExists: await pathExists(registeredPaths.installedExePath),
@@ -410,7 +533,7 @@ export async function listPackedWinNamespaces(config: ToolPackConfig): Promise<W
       productUserDataRoot,
       productUserDataRootExists: await pathExists(productUserDataRoot),
       registryEntries,
-      registryResidues: registryEntries.map((entry) => entry.keyPath),
+      registryResidues,
       removalPlan: await createWinRemovalPlan(config),
       runtimeNamespaceRoot: config.roots.runtime.namespaceRoot,
       runtimeNamespaceRootExists: await pathExists(config.roots.runtime.namespaceRoot),

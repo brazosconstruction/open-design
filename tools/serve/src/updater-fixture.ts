@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { basename } from "node:path";
 
 type UpdaterFixtureChannel = "stable" | "beta" | "nightly" | "preview";
+type UpdaterFixtureArtifactKind = "dmg" | "installer" | "payload";
 
 export type UpdaterFixtureOptions = {
   artifactBody?: Buffer | string;
+  artifactKind?: UpdaterFixtureArtifactKind;
+  artifactName?: string;
+  artifactPath?: string;
   channel?: UpdaterFixtureChannel;
   host?: string;
   platform?: "mac" | "win";
@@ -14,6 +20,7 @@ export type UpdaterFixtureOptions = {
 };
 
 export type UpdaterFixtureInfo = {
+  artifactKind: UpdaterFixtureArtifactKind;
   artifactUrl: string;
   channel: UpdaterFixtureChannel;
   checksumUrl: string;
@@ -49,6 +56,10 @@ function serverOrigin(server: Server): string {
   const address = server.address();
   if (address == null || typeof address === "string") throw new Error("updater fixture did not listen on TCP");
   return `http://127.0.0.1:${address.port}`;
+}
+
+function pathSegment(value: string): string {
+  return encodeURIComponent(value);
 }
 
 function prereleaseCounterParts(version: string): { baseVersion: string; number: number } | null {
@@ -144,6 +155,47 @@ function normalizeChannel(value: string | undefined): UpdaterFixtureChannel {
   throw new Error(`unsupported updater fixture channel: ${value}`);
 }
 
+function normalizeArtifactKind(
+  platform: "mac" | "win",
+  value: UpdaterFixtureArtifactKind | undefined,
+): UpdaterFixtureArtifactKind {
+  const kind = value ?? (platform === "win" ? "installer" : "dmg");
+  if (platform === "mac" && kind !== "dmg") throw new Error("mac updater fixture only supports dmg artifacts");
+  if (platform === "win" && kind !== "installer" && kind !== "payload") {
+    throw new Error("win updater fixture supports installer or payload artifacts");
+  }
+  return kind;
+}
+
+function artifactDefaults(input: {
+  artifactName: string | undefined;
+  artifactPath: string | undefined;
+  kind: UpdaterFixtureArtifactKind;
+  platform: "mac" | "win";
+  version: string;
+}): { artifactKey: string; artifactName: string; contentType: string } {
+  const artifactName = input.artifactName ?? (input.artifactPath == null ? undefined : basename(input.artifactPath));
+  if (input.kind === "payload") {
+    return {
+      artifactKey: "payload",
+      artifactName: artifactName ?? `open-design-${input.version}-win-x64-payload.7z`,
+      contentType: "application/x-7z-compressed",
+    };
+  }
+  if (input.kind === "installer") {
+    return {
+      artifactKey: "installer",
+      artifactName: artifactName ?? `open-design-${input.version}-win-x64-setup.exe`,
+      contentType: "application/vnd.microsoft.portable-executable",
+    };
+  }
+  return {
+    artifactKey: "dmg",
+    artifactName: artifactName ?? `open-design-${input.version}-mac-arm64.dmg`,
+    contentType: "application/x-apple-diskimage",
+  };
+}
+
 function channelMetadata(channel: UpdaterFixtureChannel, version: string): Record<string, unknown> {
   if (channel === "stable") {
     return {
@@ -191,19 +243,23 @@ export async function startUpdaterFixtureServer(options: UpdaterFixtureOptions =
   const channel = normalizeChannel(options.channel);
   const host = options.host ?? "127.0.0.1";
   const platform = options.platform ?? "mac";
+  const artifactKind = normalizeArtifactKind(platform, options.artifactKind);
   const port = options.port ?? 0;
   const version = options.version ?? "99.0.0";
   const platformKey = platform === "win" ? "win" : "mac";
-  const artifactKey = platform === "win" ? "installer" : "dmg";
-  const artifactName = platform === "win"
-    ? `open-design-${version}-win-x64-setup.exe`
-    : `open-design-${version}-mac-arm64.dmg`;
-  const contentType = platform === "win"
-    ? "application/vnd.microsoft.portable-executable"
-    : "application/x-apple-diskimage";
-  const artifactBody = Buffer.isBuffer(options.artifactBody)
-    ? options.artifactBody
-    : Buffer.from(options.artifactBody ?? `Open Design updater fixture ${version}\n`, "utf8");
+  const { artifactKey, artifactName, contentType } = artifactDefaults({
+    artifactName: options.artifactName,
+    artifactPath: options.artifactPath,
+    kind: artifactKind,
+    platform,
+    version,
+  });
+  const artifactBody =
+    options.artifactPath == null
+      ? Buffer.isBuffer(options.artifactBody)
+        ? options.artifactBody
+        : Buffer.from(options.artifactBody ?? `Open Design updater fixture ${version}\n`, "utf8")
+      : await readFile(options.artifactPath);
   const sha256 = createHash("sha256").update(artifactBody).digest("hex");
 
   let info: UpdaterFixtureInfo | null = null;
@@ -245,11 +301,12 @@ export async function startUpdaterFixtureServer(options: UpdaterFixtureOptions =
       }));
       return;
     }
-    if (path === `/${channel}/versions/${version}/${artifactName}`) {
+    const encodedArtifactName = pathSegment(artifactName);
+    if (path === `/${channel}/versions/${version}/${encodedArtifactName}`) {
       sendArtifact(request, response, artifactBody, contentType);
       return;
     }
-    if (path === `/${channel}/versions/${version}/${artifactName}.sha256`) {
+    if (path === `/${channel}/versions/${version}/${encodedArtifactName}.sha256`) {
       response.setHeader("content-type", "text/plain; charset=utf-8");
       response.end(`${sha256}  ${artifactName}\n`);
       return;
@@ -260,8 +317,9 @@ export async function startUpdaterFixtureServer(options: UpdaterFixtureOptions =
 
   await listen(server, port, host);
   const origin = serverOrigin(server);
-  const artifactUrl = `${origin}/${channel}/versions/${version}/${artifactName}`;
+  const artifactUrl = `${origin}/${channel}/versions/${version}/${pathSegment(artifactName)}`;
   info = {
+    artifactKind,
     artifactUrl,
     channel,
     checksumUrl: `${artifactUrl}.sha256`,

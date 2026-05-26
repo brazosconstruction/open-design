@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@electron/rebuild": "4.0.4",
+    "@open-design/launcher-proto": "workspace:*",
     "@open-design/platform": "workspace:*",
     "@open-design/sidecar": "workspace:*",
     "@open-design/sidecar-proto": "workspace:*",

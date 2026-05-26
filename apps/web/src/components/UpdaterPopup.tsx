@@ -183,7 +183,7 @@ export function UpdaterPopup() {
     };
   }, [close, panelOpen]);
 
-  const installAndQuit = async () => {
+  const installUpdate = async () => {
     if (actionInFlightRef.current || !canStartInstall) return;
     actionInFlightRef.current = true;
     clearHandoffWatchdog();
@@ -223,14 +223,20 @@ export function UpdaterPopup() {
         return;
       }
       setModel(result.model);
-      setInstallState('handoff');
-      startHandoffWatchdog();
       trackUpdateInstallResult(analytics.track, {
         page_name: 'home',
         area: 'update_prompt',
         result: 'success',
         ...versionProps,
       });
+      if (!result.model.canQuitAfterInstallerOpen) {
+        actionInFlightRef.current = false;
+        setInstallState('idle');
+        if (!result.model.shouldShowControl) setPanelOpen(false);
+        return;
+      }
+      setInstallState('handoff');
+      startHandoffWatchdog();
       const quitResult = await quitAfterUpdaterInstallerOpen({ payload: { source: 'updater-prompt' } });
       if (!quitResult.ok) {
         clearHandoffWatchdog();
@@ -310,7 +316,7 @@ export function UpdaterPopup() {
               disabled={installBusy}
               type="button"
               onClick={() => {
-                void installAndQuit();
+                void installUpdate();
               }}
             >
               {installBusy ? t('updater.opening') : t('updater.openInstaller')}

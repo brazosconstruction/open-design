@@ -20,6 +20,7 @@ import { app, dialog } from "electron";
 import { readPackagedConfig } from "./config.js";
 import { writePackagedDesktopIdentity } from "./identity.js";
 import { PackagedPathAccessError } from "./errors.js";
+import { resolvePackagedLauncherInstallContext } from "./launcher-install.js";
 import {
   applyPackagedElectronPathOverrides,
   claimPackagedSingleInstanceLock,
@@ -80,6 +81,10 @@ async function main(): Promise<void> {
   const namespace = argvStamp?.namespace ?? config.namespace;
   const paths = resolvePackagedNamespacePaths(config, namespace, process.env);
   const stamp = argvStamp ?? await createPackagedDesktopStamp(namespace);
+  const launcherInstall = resolvePackagedLauncherInstallContext(process.execPath, {
+    namespace,
+    requireInstallRootMarkers: true,
+  });
 
   await ensurePackagedNamespacePaths(paths);
   await writeAppControlEndpoint({
@@ -160,6 +165,14 @@ async function main(): Promise<void> {
       currentVersion: config.appVersion,
       downloadRoot: paths.updateRoot,
       installerObservationRoot: paths.installerObservationRoot,
+      launcherConfigPath: launcherInstall?.launcherConfigPath,
+      launcherCleanupMarkerPath: launcherInstall?.cleanupMarkerPath,
+      launcherInstallMetadataPath: launcherInstall?.installMetadataPath,
+      launcherInstallRoot: launcherInstall?.installRoot,
+      launcherLockPath: launcherInstall?.lockPath,
+      launcherRuntimeConfigPath: launcherInstall?.runtimeConfigPath,
+      launcherSevenZipDllPath: launcherInstall?.sevenZipDllPath,
+      launcherSevenZipPath: launcherInstall?.sevenZipPath,
     },
   });
 }

@@ -42,7 +42,8 @@ export function resolveWinPaths(config: ToolPackConfig): WinPaths {
     daemonSidecarPrebundlePath: join(namespaceRoot, "assembled", WIN_PREBUNDLED_DAEMON_SIDECAR_RELATIVE_PATH),
     exePath: join(namespaceRoot, "builder", `${PRODUCT_NAME}-${namespaceToken}.exe`),
     installDir,
-    installedExePath: join(installDir, `${PRODUCT_NAME}.exe`),
+    installedExePath: join(installDir, identity.exeName),
+    launcherInstallRoot: join(namespaceRoot, "installer", "app"),
     installerPayloadPath: join(namespaceRoot, "installer", "payload.7z"),
     installerScriptPath: join(namespaceRoot, "installer", "installer.nsi"),
     publicDesktopShortcutPath: join(process.env.PUBLIC ?? join(dirname(homedir()), "Public"), "Desktop", identity.shortcutName),
@@ -69,6 +70,7 @@ export function resolveWinPaths(config: ToolPackConfig): WinPaths {
     winIconPath: join(namespaceRoot, "resources", "win", "icon.ico"),
     unpackedExePath: join(namespaceRoot, "builder", "win-unpacked", `${PRODUCT_NAME}.exe`),
     unpackedRoot: join(namespaceRoot, "builder", "win-unpacked"),
+    updatePayloadPath: join(namespaceRoot, "builder", `${PRODUCT_NAME}-${namespaceToken}-payload.7z`),
   };
 }
 

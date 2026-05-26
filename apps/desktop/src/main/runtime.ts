@@ -1282,7 +1282,10 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
   ipcMain.handle("od:update:quit", async (event): Promise<OpenDesignHostActionResult> => {
     requireMainWindowSender(event);
     const status = await (options.updater?.status() ?? unavailableUpdaterStatus());
-    if (status.installResult == null) {
+    const installerOpened =
+      status.installResult != null &&
+      (status.installResult.kind == null || status.installResult.kind === "installer-open");
+    if (!installerOpened) {
       return { ok: false, reason: "installer has not been opened" };
     }
     if (options.requestQuit == null) {
@@ -1327,6 +1330,7 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
   let currentUrl: string | null = null;
   let currentPetUrl: string | null = null;
   let pendingUrl: string | null = null;
+  let launcherReadyConfirmationStarted = false;
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
 
@@ -1440,6 +1444,19 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
     }, delayMs);
   };
 
+  const runLauncherStartupMaintenanceOnce = () => {
+    if (launcherReadyConfirmationStarted) return;
+    launcherReadyConfirmationStarted = true;
+    void (async () => {
+      await options.updater?.confirmLauncherReady();
+      await options.updater?.cleanupLauncherVersions();
+      await options.updater?.observeLauncherSelfUpdate();
+      await options.updater?.reconcileLauncherInstall();
+    })().catch((error: unknown) => {
+      console.warn("desktop launcher startup maintenance failed", error);
+    });
+  };
+
   const tick = async () => {
     if (stopped || window.isDestroyed()) return;
 
@@ -1451,6 +1468,7 @@ export async function createDesktopRuntime(options: DesktopRuntimeOptions): Prom
         currentUrl = url;
         pendingUrl = null;
         showWindowButtons(window);
+        runLauncherStartupMaintenanceOnce();
         const nextPetUrl = desktopPetUrl(url);
         if (!petWindow.isDestroyed() && nextPetUrl !== currentPetUrl) {
           await petWindow.loadURL(nextPetUrl);

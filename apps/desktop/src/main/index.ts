@@ -111,9 +111,18 @@ export type DesktopMainOptions = {
   preloadPath?: string;
   onDesktopReady?: (controls: { show(): void }) => void;
   update?: {
+    appVersion?: string | null;
     currentVersion?: string | null;
     downloadRoot?: string | null;
     installerObservationRoot?: string | null;
+    launcherConfigPath?: string | null;
+    launcherCleanupMarkerPath?: string | null;
+    launcherInstallMetadataPath?: string | null;
+    launcherInstallRoot?: string | null;
+    launcherLockPath?: string | null;
+    launcherRuntimeConfigPath?: string | null;
+    launcherSevenZipDllPath?: string | null;
+    launcherSevenZipPath?: string | null;
   };
 };
 
@@ -367,8 +376,17 @@ export async function runDesktopMain(
   const updater = createDesktopUpdater(
     {
       currentVersion: options.update?.currentVersion,
+      appVersion: options.update?.appVersion ?? options.update?.currentVersion,
       downloadRoot: options.update?.downloadRoot,
       installerObservationRoot: options.update?.installerObservationRoot,
+      launcherConfigPath: options.update?.launcherConfigPath,
+      launcherCleanupMarkerPath: options.update?.launcherCleanupMarkerPath,
+      launcherInstallMetadataPath: options.update?.launcherInstallMetadataPath,
+      launcherInstallRoot: options.update?.launcherInstallRoot,
+      launcherLockPath: options.update?.launcherLockPath,
+      launcherRuntimeConfigPath: options.update?.launcherRuntimeConfigPath,
+      launcherSevenZipDllPath: options.update?.launcherSevenZipDllPath,
+      launcherSevenZipPath: options.update?.launcherSevenZipPath,
       namespace: runtime.namespace,
       runtimeBase: runtime.base,
       source: runtime.source,

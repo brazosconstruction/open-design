@@ -65,6 +65,11 @@ fn run() -> Result<(), Box<dyn Error>> {
                 println!("selectedSlot={}", plan.selected_slot);
                 println!("selectedVersion={}", plan.selected_version);
                 println!("namespaceRoot={}", plan.namespace_root.display());
+                println!(
+                    "payloadExecutable={}",
+                    plan.payload_process.executable.display()
+                );
+                println!("payloadCwd={}", plan.payload_process.cwd.display());
                 if let Some(error) = &plan.active_error {
                     println!("activeError={error}");
                 }

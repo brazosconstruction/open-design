@@ -133,6 +133,9 @@ importers:
       '@open-design/host':
         specifier: workspace:*
         version: link:../../packages/host
+      '@open-design/launcher-proto':
+        specifier: workspace:*
+        version: link:../../packages/launcher-proto
       '@open-design/platform':
         specifier: workspace:*
         version: link:../../packages/platform
@@ -579,6 +582,9 @@ importers:
       '@electron/rebuild':
         specifier: 4.0.4
         version: 4.0.4
+      '@open-design/launcher-proto':
+        specifier: workspace:*
+        version: link:../../packages/launcher-proto
       '@open-design/platform':
         specifier: workspace:*
         version: link:../../packages/platform

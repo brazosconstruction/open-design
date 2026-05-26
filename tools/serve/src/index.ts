@@ -3,6 +3,8 @@ import { cac } from "cac";
 import { startUpdaterFixtureServer } from "./updater-fixture.js";
 
 type CliOptions = {
+  artifactKind?: "dmg" | "installer" | "payload";
+  artifactPath?: string;
   channel?: "stable" | "beta" | "nightly" | "preview";
   host?: string;
   json?: boolean;
@@ -30,9 +32,17 @@ function parsePlatform(value: string | undefined): "mac" | "win" {
   throw new Error("--platform must be mac or win");
 }
 
+function parseArtifactKind(value: string | undefined): "dmg" | "installer" | "payload" | undefined {
+  if (value == null || value.length === 0) return undefined;
+  if (value === "dmg" || value === "installer" || value === "payload") return value;
+  throw new Error("--artifact-kind must be dmg, installer, or payload");
+}
+
 async function start(service: string, options: CliOptions): Promise<void> {
   if (service !== "updater") throw new Error(`unsupported tools-serve service: ${service}`);
   const server = await startUpdaterFixtureServer({
+    artifactKind: parseArtifactKind(options.artifactKind),
+    artifactPath: options.artifactPath,
     channel: options.channel,
     host: options.host,
     platform: parsePlatform(options.platform),
@@ -65,6 +75,8 @@ const cli = cac("tools-serve");
 
 cli
   .command("start <service>", "Start a local fixture service")
+  .option("--artifact-kind <kind>", "Updater artifact kind: dmg|installer|payload")
+  .option("--artifact-path <path>", "Serve artifact bytes from a local file")
   .option("--channel <channel>", "Updater channel: stable|beta|nightly|preview", { default: "stable" })
   .option("--host <host>", "Host to bind", { default: "127.0.0.1" })
   .option("--json", "Print JSON")

@@ -1,7 +1,7 @@
 use launcher_core::PayloadEntry;
 use launcher_platform::{LauncherPlatformError, ProcessSpec};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use thiserror::Error;
 
 mod runtime;
@@ -41,6 +41,12 @@ pub enum LauncherLifecycleError {
     MissingRuntimeDescriptor,
     #[error("launcher config must contain entry and payloadRoot when runtimePath is not configured")]
     MissingLegacyPayload,
+    #[error("{field} must be a clean relative path under descriptor root {root}: {path}")]
+    InvalidConfigRelativePath {
+        field: &'static str,
+        path: String,
+        root: String,
+    },
     #[error("unsupported runtime descriptor schema at {path}: expected {expected}, got {actual}")]
     UnsupportedRuntimeSchema {
         actual: u32,
@@ -53,8 +59,6 @@ pub enum LauncherLifecycleError {
         expected: u32,
         path: String,
     },
-    #[error("runtime descriptor must contain at least one app")]
-    EmptyRuntimeApps,
     #[error("runtime descriptor reuses endpoint {endpoint}")]
     DuplicateEndpoint { endpoint: String },
     #[error("runtime {slot} version {version} root does not exist: {path}")]
@@ -72,6 +76,14 @@ pub enum LauncherLifecycleError {
     #[error("runtime {slot} version {version} cwd does not exist: {path}")]
     RuntimeCwdMissing {
         path: String,
+        slot: RuntimeSelectionSlot,
+        version: String,
+    },
+    #[error("runtime {slot} version {version} {field} must be a clean relative path under {root}: {path}")]
+    InvalidRuntimeRelativePath {
+        field: &'static str,
+        path: String,
+        root: String,
         slot: RuntimeSelectionSlot,
         version: String,
     },
@@ -340,6 +352,46 @@ pub(crate) fn resolve_config_path(root: &Path, value: &str) -> PathBuf {
     } else {
         root.join(path)
     }
+}
+
+pub(crate) fn resolve_config_relative_path(
+    root: &Path,
+    value: &str,
+    field: &'static str,
+) -> Result<PathBuf, LauncherLifecycleError> {
+    if !is_clean_relative_descriptor_path(value) {
+        return Err(LauncherLifecycleError::InvalidConfigRelativePath {
+            field,
+            path: value.to_owned(),
+            root: root.display().to_string(),
+        });
+    }
+    if value == "." {
+        return Ok(root.to_path_buf());
+    }
+    Ok(root.join(Path::new(value)))
+}
+
+pub(crate) fn is_clean_relative_descriptor_path(value: &str) -> bool {
+    if value.contains('\0') {
+        return false;
+    }
+    let normalized = value.replace('\\', "/");
+    if normalized.starts_with('/') || normalized.chars().nth(1) == Some(':') {
+        return false;
+    }
+    if normalized == "." {
+        return true;
+    }
+    if normalized.split('/').any(|segment| segment.is_empty() || segment == "..") {
+        return false;
+    }
+    for component in Path::new(value).components() {
+        if matches!(component, Component::Prefix(_) | Component::RootDir | Component::ParentDir) {
+            return false;
+        }
+    }
+    true
 }
 
 fn resolve_search_root(cwd: &Path, root: &Path) -> PathBuf {

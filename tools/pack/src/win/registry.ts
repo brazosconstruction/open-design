@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import type { ToolPackConfig } from "../config.js";
 import { pathExists } from "./fs.js";
 import { resolveWinInstallIdentity } from "./identity.js";
-import type { WinPaths, WindowsUninstallRegistryEntry } from "./types.js";
+import type { WinPaths, WindowsAppPathsRegistryEntry, WindowsUninstallRegistryEntry } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,8 +42,22 @@ function normalizeRegistryKeyPath(value: string): string {
     .toLowerCase();
 }
 
+function displayRegistryKeyPath(value: string): string {
+  return value
+    .replace(/^HKCU\\/i, "HKEY_CURRENT_USER\\")
+    .replace(/^HKLM\\/i, "HKEY_LOCAL_MACHINE\\");
+}
+
+function isRegDefaultValueName(value: string): boolean {
+  return value === "(Default)" || /^\(.+\)$/.test(value);
+}
+
 function namespaceRegistryKeyPath(config: Pick<ToolPackConfig, "namespace">): string {
   return normalizeRegistryKeyPath(`HKCU\\${resolveWinInstallIdentity(config).registryKey}`);
+}
+
+function namespaceAppPathsQueryKey(config: Pick<ToolPackConfig, "namespace" | "appVersion">): string {
+  return `HKCU\\${resolveWinInstallIdentity(config).appPathsKey}`;
 }
 
 async function execReg(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
@@ -68,6 +82,24 @@ function registryEntryMatches(
     uninstallString.includes(targetUninstaller) ||
     quietUninstallString.includes(targetUninstaller)
   );
+}
+
+function winAppPathsTargetPaths(
+  paths: Pick<WinPaths, "installedExePath" | "launcherInstallRoot">,
+  config?: Pick<ToolPackConfig, "namespace" | "appVersion">,
+): string[] {
+  const targets = [paths.installedExePath];
+  if (config != null) targets.push(join(paths.launcherInstallRoot, resolveWinInstallIdentity(config).exeName));
+  return [...new Set(targets.map((target) => normalizeRegistryPath(target)).filter((target) => target.length > 0))];
+}
+
+export function winAppPathsEntryMatches(
+  paths: Pick<WinPaths, "installedExePath" | "launcherInstallRoot">,
+  entry: WindowsAppPathsRegistryEntry,
+  config?: Pick<ToolPackConfig, "namespace" | "appVersion">,
+): boolean {
+  const defaultPath = normalizeRegistryPath(stripRegistryQuotedValue(entry.defaultPath));
+  return winAppPathsTargetPaths(paths, config).includes(defaultPath);
 }
 
 export async function queryWinRegistryEntries(
@@ -148,24 +180,83 @@ export async function queryWinNamespaceRegistryEntry(
   return entry;
 }
 
-export async function resolveWinRegisteredPaths(config: ToolPackConfig, paths: WinPaths): Promise<WinPaths> {
-  const entry = await queryWinNamespaceRegistryEntry(config, paths);
-  if (entry == null) return paths;
+export function parseWinAppPathsRegistryEntry(
+  keyPath: string,
+  stdout: string,
+): WindowsAppPathsRegistryEntry {
+  const entry: WindowsAppPathsRegistryEntry = {
+    defaultPath: null,
+    keyPath: displayRegistryKeyPath(keyPath),
+  };
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    if (line.length === 0 || line.startsWith("HKEY_")) continue;
+    const [name, , ...valueParts] = line.trim().split(/\s{2,}/);
+    if (name == null || valueParts.length === 0) continue;
+    if (!isRegDefaultValueName(name)) continue;
+    entry.defaultPath = valueParts.join("  ");
+  }
+  return entry;
+}
+
+export async function queryWinAppPathsRegistryEntry(
+  config: Pick<ToolPackConfig, "namespace" | "appVersion">,
+  paths: WinPaths,
+): Promise<WindowsAppPathsRegistryEntry | null> {
+  const keyPath = namespaceAppPathsQueryKey(config);
+  let stdout = "";
+  try {
+    ({ stdout } = await execReg(
+      ["query", keyPath],
+      await pathExists(paths.appBuilderOutputRoot) ? paths.appBuilderOutputRoot : process.cwd(),
+    ));
+  } catch {
+    return null;
+  }
+  return parseWinAppPathsRegistryEntry(keyPath, stdout);
+}
+
+export async function queryWinRegistryResiduePaths(
+  paths: WinPaths,
+  config?: Pick<ToolPackConfig, "namespace" | "appVersion">,
+): Promise<string[]> {
+  const entries = await queryWinRegistryEntries(paths, config);
+  const residues = entries.map((entry) => entry.keyPath);
+  if (config == null) return residues;
+  const appPathsEntry = await queryWinAppPathsRegistryEntry(config, paths);
+  if (appPathsEntry != null && winAppPathsEntryMatches(paths, appPathsEntry, config)) {
+    residues.push(appPathsEntry.keyPath);
+  }
+  return residues;
+}
+
+export function resolveWinRegisteredPathsFromEntry(
+  config: Pick<ToolPackConfig, "namespace">,
+  paths: WinPaths,
+  entry: WindowsUninstallRegistryEntry,
+): WinPaths {
   const identity = resolveWinInstallIdentity(config);
   const uninstallerFromRegistry = stripRegistryQuotedValue(entry.quietUninstallString) || stripRegistryQuotedValue(entry.uninstallString);
   const installDir = stripRegistryQuotedValue(entry.installLocation) || (uninstallerFromRegistry.length > 0 ? dirname(uninstallerFromRegistry) : paths.installDir);
+  const installedExePath = join(installDir, identity.exeName);
   const uninstallerPath = uninstallerFromRegistry.length > 0 ? uninstallerFromRegistry : join(installDir, identity.uninstallerName);
   return {
     ...paths,
     installDir,
-    installedExePath: join(installDir, identity.exeName),
+    installedExePath,
     uninstallerPath,
   };
 }
 
+export async function resolveWinRegisteredPaths(config: ToolPackConfig, paths: WinPaths): Promise<WinPaths> {
+  const entry = await queryWinNamespaceRegistryEntry(config, paths);
+  if (entry == null) return paths;
+  return resolveWinRegisteredPathsFromEntry(config, paths, entry);
+}
+
 export async function cleanupWinRegistryResidues(
   paths: WinPaths,
-  config?: Pick<ToolPackConfig, "namespace">,
+  config?: Pick<ToolPackConfig, "namespace" | "appVersion">,
 ): Promise<string[]> {
   const entries = await queryWinRegistryEntries(paths, config);
   const removed: string[] = [];
@@ -175,6 +266,18 @@ export async function cleanupWinRegistryResidues(
       removed.push(entry.keyPath);
     } catch {
       // HKLM residues may require elevation; keep observing them instead of hiding failure.
+    }
+  }
+  if (config != null) {
+    const appPathsEntry = await queryWinAppPathsRegistryEntry(config, paths);
+    if (appPathsEntry != null && winAppPathsEntryMatches(paths, appPathsEntry, config)) {
+      const appPathsKey = namespaceAppPathsQueryKey(config);
+      try {
+        await execReg(["delete", appPathsKey, "/f"], await pathExists(paths.appBuilderOutputRoot) ? paths.appBuilderOutputRoot : process.cwd());
+        removed.push(appPathsEntry.keyPath);
+      } catch {
+        // Missing or protected App Paths entries are surfaced by later observation instead of blocking cleanup.
+      }
     }
   }
   return removed;

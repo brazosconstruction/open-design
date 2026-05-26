@@ -176,11 +176,34 @@ export async function runTimed<T>(timingPath: string, action: string, task: () =
   }
 }
 
+function quotePowerShellSingle(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function powerShellArrayLiteral(values: string[]): string {
+  return `@(${values.map(quotePowerShellSingle).join(", ")})`;
+}
+
+async function execNsisUninstaller(command: string, args: string[]): Promise<void> {
+  const script = [
+    '$ErrorActionPreference = "Stop"',
+    `$process = Start-Process -FilePath ${quotePowerShellSingle(command)} -ArgumentList ${powerShellArrayLiteral(args)} -Wait -PassThru`,
+    'if ($null -eq $process.ExitCode) { exit 0 }',
+    "exit $process.ExitCode",
+  ].join("\n");
+  await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], {
+    cwd: dirname(command),
+    windowsHide: true,
+  });
+}
+
 export async function invokeNsis(paths: WinPaths, command: string, args: string[], action: "install" | "uninstall"): Promise<void> {
   await appendNsisLog(paths, `${action} started`, { args, command });
   try {
     const directoryArg = args.at(-1);
-    if (process.platform === "win32" && directoryArg?.startsWith("/D=")) {
+    if (process.platform === "win32" && action === "uninstall") {
+      await execNsisUninstaller(command, args);
+    } else if (process.platform === "win32" && directoryArg?.startsWith("/D=")) {
       await execFileAsync(command, args, { cwd: dirname(command), windowsHide: true, windowsVerbatimArguments: true });
     } else {
       await execFileAsync(command, args, { cwd: dirname(command), windowsHide: true });

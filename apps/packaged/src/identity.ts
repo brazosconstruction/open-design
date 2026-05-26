@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { removeFile, writeJsonFile } from "@open-design/sidecar";
 import type { SidecarStamp } from "@open-design/sidecar-proto";
 
+import { resolvePackagedLauncherInstallContext } from "./launcher-install.js";
 import type { PackagedNamespacePaths } from "./paths.js";
 
 export type PackagedDesktopRootIdentity = {
@@ -35,6 +36,11 @@ function resolveCurrentMacAppPath(executablePath: string): string {
   return dirname(dirname(dirname(executablePath)));
 }
 
+export function resolvePackagedDesktopAppPath(executablePath: string): string {
+  const launcherContext = resolvePackagedLauncherInstallContext(executablePath);
+  return launcherContext?.installRoot ?? resolveCurrentMacAppPath(executablePath);
+}
+
 function createPackagedDesktopRootIdentity(options: {
   paths: PackagedNamespacePaths;
   stamp: SidecarStamp;
@@ -43,7 +49,7 @@ function createPackagedDesktopRootIdentity(options: {
   const executablePath = process.execPath;
 
   return {
-    appPath: resolveCurrentMacAppPath(executablePath),
+    appPath: resolvePackagedDesktopAppPath(executablePath),
     executablePath,
     logPath: options.paths.desktopLogPath,
     namespaceRoot: options.paths.namespaceRoot,

@@ -74,6 +74,49 @@ describe("launcher proto", () => {
     expect(JSON.stringify(runtime)).not.toContain("\"ipc\"");
   });
 
+  it("rejects descriptor paths that are absolute or escape their root", () => {
+    expect(() => buildLauncherConfig({ runtimePath: "C:/outside/runtime.json" })).toThrow(/runtimePath/);
+    expect(() => buildLauncherConfig({ attemptPath: "../attempt.json" })).toThrow(/attemptPath/);
+    expect(() =>
+      buildRuntimeConfig({
+        ...packagedRuntime(),
+        namespaceRoot: "../outside",
+      }),
+    ).toThrow(/namespaceRoot/);
+    expect(() =>
+      buildRuntimeConfig({
+        ...packagedRuntime(),
+        active: {
+          ...packagedRuntime().active,
+          root: "../versions/0.8.1",
+        },
+      }),
+    ).toThrow(/active\.root/);
+    expect(() =>
+      buildRuntimeConfig({
+        ...packagedRuntime(),
+        active: {
+          ...packagedRuntime().active,
+          entry: {
+            executable: "../Open Design Payload.exe",
+          },
+        },
+      }),
+    ).toThrow(/active\.entry\.executable/);
+    expect(() =>
+      buildRuntimeConfig({
+        ...packagedRuntime(),
+        active: {
+          ...packagedRuntime().active,
+          entry: {
+            cwd: "payload/../outside",
+            executable: "payload/Open Design Payload.exe",
+          },
+        },
+      }),
+    ).toThrow(/active\.entry\.cwd/);
+  });
+
   it("normalizes endpoint", () => {
     expect(normalizeEndpoint("tcp://127.0.0.1:65535")).toBe("tcp://127.0.0.1:65535");
     expect(() => normalizeEndpoint("unix:///tmp/open-design.sock")).toThrow();

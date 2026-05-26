@@ -34,6 +34,31 @@ describe("desktop updater host boundary", () => {
     expect(scheduleBody).not.toContain("showUpdateResultDialog");
   });
 
+  it("runs launcher startup maintenance asynchronously after the renderer URL loads", () => {
+    const runtime = source("src/main/runtime.ts");
+    const helperStart = runtime.indexOf("const runLauncherStartupMaintenanceOnce = () =>");
+    const tickStart = runtime.indexOf("const tick = async () =>", helperStart);
+    expect(helperStart).toBeGreaterThanOrEqual(0);
+    expect(tickStart).toBeGreaterThan(helperStart);
+
+    const helperBody = runtime.slice(helperStart, tickStart);
+    expect(helperBody).toContain("void (async () =>");
+    expect(helperBody.indexOf("confirmLauncherReady()")).toBeLessThan(
+      helperBody.indexOf("cleanupLauncherVersions()"),
+    );
+    expect(helperBody.indexOf("cleanupLauncherVersions()")).toBeLessThan(
+      helperBody.indexOf("observeLauncherSelfUpdate()"),
+    );
+    expect(helperBody.indexOf("observeLauncherSelfUpdate()")).toBeLessThan(
+      helperBody.indexOf("reconcileLauncherInstall()"),
+    );
+
+    const tickBody = runtime.slice(tickStart, runtime.indexOf("void tick();", tickStart));
+    expect(tickBody.indexOf("await window.loadURL(url)")).toBeLessThan(
+      tickBody.indexOf("runLauncherStartupMaintenanceOnce()"),
+    );
+  });
+
   it("keeps updater actions out of native desktop menus", () => {
     const main = source("src/main/index.ts");
     expect(main).not.toContain("Check for Updates");
@@ -62,7 +87,8 @@ describe("desktop updater host boundary", () => {
     expect(quitStart).toBeGreaterThanOrEqual(0);
     expect(quitEnd).toBeGreaterThan(quitStart);
     const quitHandler = runtime.slice(quitStart, quitEnd);
-    expect(quitHandler).toContain("status.installResult == null");
+    expect(quitHandler).toContain('status.installResult.kind === "installer-open"');
+    expect(quitHandler).toContain("status.installResult.kind == null");
     expect(quitHandler).toContain("requestQuit");
     expect(quitHandler).not.toContain("installUpdate()");
   });

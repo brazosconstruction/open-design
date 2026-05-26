@@ -105,10 +105,10 @@ export type LauncherConfigInput = {
 export function buildLauncherConfig(input: LauncherConfigInput = {}): LauncherConfig {
   const runtimePath = input.runtimePath == null
     ? DEFAULT_RUNTIME_CONFIG_FILE
-    : nonEmptyString(input.runtimePath, "runtimePath");
+    : normalizeDescriptorPath(input.runtimePath, "runtimePath");
   const attemptPath = input.attemptPath == null
     ? undefined
-    : nonEmptyString(input.attemptPath, "attemptPath");
+    : normalizeDescriptorPath(input.attemptPath, "attemptPath");
   return {
     ...(attemptPath == null ? {} : { attemptPath }),
     runtimePath,
@@ -122,7 +122,7 @@ export function buildRuntimeConfig(input: RuntimeConfigInput): RuntimeConfig {
     generation: normalizeGeneration(input.generation),
     lastSuccessful: buildRuntimeVersion(input.lastSuccessful, "lastSuccessful"),
     namespace: normalizeNamespace(input.namespace),
-    namespaceRoot: nonEmptyString(input.namespaceRoot, "namespaceRoot"),
+    namespaceRoot: normalizeDescriptorPath(input.namespaceRoot, "namespaceRoot"),
     schemaVersion: RUNTIME_CONFIG_SCHEMA_VERSION,
   };
 }
@@ -131,7 +131,7 @@ export function buildRuntimeVersion(input: RuntimeVersionInput, label: string): 
   return {
     apps: buildRuntimeApps(input.apps ?? {}),
     entry: normalizeEntry(input.entry, `${label}.entry`),
-    root: nonEmptyString(input.root, `${label}.root`),
+    root: normalizeDescriptorPath(input.root, `${label}.root`),
     version: nonEmptyString(input.version, `${label}.version`),
   };
 }
@@ -197,9 +197,9 @@ function normalizeEntry(input: LauncherEntryInput, label: string): LauncherEntry
   if (input == null || typeof input !== "object") throw protoError(`${label} must be an object`);
   return {
     args: normalizeArgs(input.args ?? [], `${label}.args`),
-    ...(input.cwd == null ? {} : { cwd: nonEmptyString(input.cwd, `${label}.cwd`) }),
+    ...(input.cwd == null ? {} : { cwd: normalizeDescriptorPath(input.cwd, `${label}.cwd`) }),
     env: normalizeEnv(input.env ?? {}, `${label}.env`),
-    executable: nonEmptyString(input.executable, `${label}.executable`),
+    executable: normalizeDescriptorPath(input.executable, `${label}.executable`),
   };
 }
 
@@ -236,6 +236,22 @@ function nonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string") throw protoError(`${label} must be a string`);
   if (value.trim().length === 0) throw protoError(`${label} must not be empty`);
   return value;
+}
+
+function normalizeDescriptorPath(value: unknown, label: string): string {
+  const path = nonEmptyString(value, label);
+  if (path.includes("\0")) throw protoError(`${label} must not contain null bytes`);
+  const normalized = path.replace(/\\/g, "/");
+  if (/^[A-Za-z]:/.test(normalized) || normalized.startsWith("/")) {
+    throw protoError(`${label} must be a relative descriptor path: ${path}`);
+  }
+  if (normalized === ".") return path;
+  const segments = normalized.split("/");
+  for (const segment of segments) {
+    if (segment.length === 0) throw protoError(`${label} must not contain empty path segments: ${path}`);
+    if (segment === "..") throw protoError(`${label} must not escape its descriptor root: ${path}`);
+  }
+  return path;
 }
 
 function protoError(message: string): LauncherProtoError {

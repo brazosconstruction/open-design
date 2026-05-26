@@ -51,7 +51,7 @@ Read this section before changing packaged auto-update behavior. The updater cro
 The runtime updater reads `https://releases.open-design.ai/<channel>/latest/metadata.json` unless `OD_UPDATE_METADATA_URL` overrides it. For package-launcher updates:
 
 - mac selects `platforms.mac.artifacts.dmg`.
-- Windows selects `platforms.win.artifacts.installer`.
+- Windows launcher installs prefer `platforms.win.artifacts.payload` when launcher install-root metadata is available, because the stable launcher applies version payloads in place. Windows falls back to `platforms.win.artifacts.installer` for flat/legacy installs or metadata that does not publish a payload.
 - The artifact must have a checksum, preferably `sha256Url`; the updater verifies bytes before exposing an install action.
 - `OD_UPDATE_CURRENT_VERSION` may override the packaged version for tests, but user-flow package validation should prefer building the package with the intended `--app-version`.
 
@@ -74,6 +74,12 @@ Use `tools-serve start updater` for fast, deterministic tests and e2e automation
 pnpm tools-serve start updater --json --channel beta --version 99.0.0-beta.1 --platform win
 ```
 
+For launcher payload update validation, serve a real payload artifact:
+
+```bash
+pnpm tools-serve start updater --json --channel beta --version 99.0.0-beta.1 --platform win --artifact-kind payload --artifact-path <Open Design-namespace-payload.7z>
+```
+
 Then launch packaged desktop with:
 
 ```bash
@@ -85,6 +91,8 @@ OD_UPDATE_AUTO_CHECK=1
 ```
 
 This harness is appropriate for asserting IPC, popup rendering, progress, checksum/download-store behavior, and dry-run installer opening. It is not a full user-view validation because it replaces the public release feed and uses synthetic artifact bytes.
+
+When `--artifact-kind payload --artifact-path` is used with a real `tools-pack win build` payload, the harness is also appropriate for local launcher apply validation: checksum/download, `payload-apply`, `runtime.json` promotion, ready confirmation, lazy old-version cleanup, and registry/shortcut reconciliation.
 
 ### High-confidence local user-flow acceptance
 
@@ -112,10 +120,10 @@ C:\odtp-beta-release-fixed\out\win\namespaces\release-beta-win\builder\Open Desi
 
 - User installs `0.8.0-beta.5` through the NSIS UI.
 - User launches `Open Design Beta`.
-- App auto-checks the real beta feed, downloads the latest `platforms.win.artifacts.installer`, verifies sha256, and shows the web updater popup.
+- App auto-checks the real beta feed, prefers the latest `platforms.win.artifacts.payload` for launcher installs when present, verifies sha256, and shows the web updater popup. If the feed does not publish a payload yet, the updater falls back to `platforms.win.artifacts.installer`.
 - The native File menu must not expose update actions.
 - The updater popup uses i18n strings and download progress must not flash to 100% before real bytes arrive.
-- Clicking `Open installer` opens the real downloaded beta installer. Installing it should overwrite the same `Open Design-release-beta-win` registry key, not create a second beta key.
+- For payload updates, applying the update should promote `runtime.json` to the new version and reconcile registry/shortcut metadata against the same `Open Design-release-beta-win` key. For installer fallback updates, clicking `Open installer` opens the real downloaded beta installer and installing it should overwrite the same key, not create a second beta key.
 
 5. Registry sanity check after beta.6 install:
 

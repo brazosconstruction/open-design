@@ -1,9 +1,8 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import type { ToolPackConfig } from "../config.js";
 import { readRuntimeAppVersion } from "../versions.js";
-import { pathExists } from "./fs.js";
 import type { WinBuiltAppManifest, WinPaths } from "./types.js";
 
 export async function readPackagedVersion(config: ToolPackConfig): Promise<string> {
@@ -71,7 +70,10 @@ export async function readBuiltAppManifest(
   try {
     const manifest = JSON.parse(await readFile(paths.builtManifestPath, "utf8")) as WinBuiltAppManifest;
     if (manifest.version !== 1) return null;
-    if (options.requireExecutable === true && !(await pathExists(manifest.executablePath))) return null;
+    if (options.requireExecutable === true) {
+      const entry = await lstat(manifest.executablePath).catch(() => null);
+      if (entry == null || !entry.isFile() || entry.isSymbolicLink()) return null;
+    }
     return manifest;
   } catch {
     return null;

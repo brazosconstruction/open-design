@@ -38,6 +38,28 @@ function downloadedStatus(overrides: Partial<OpenDesignHostUpdaterStatusSnapshot
   };
 }
 
+function payloadDownloadedStatus(
+  overrides: Partial<OpenDesignHostUpdaterStatusSnapshot> = {},
+): OpenDesignHostUpdaterStatusSnapshot {
+  return downloadedStatus({
+    artifact: {
+      name: 'Open Design Beta 1.2.3-beta.4 win-x64-payload.7z',
+      platformKey: 'winX64',
+      type: 'payload',
+      url: 'https://fixture.test/Open Design Beta 1.2.3-beta.4 win-x64-payload.7z',
+    },
+    capabilities: {
+      canApplyInPlace: true,
+      canDownload: true,
+      canOpenInstaller: false,
+      requiresManualInstall: false,
+    },
+    downloadPath: 'C:\\Users\\Nexu\\AppData\\Local\\Open Design\\updater\\Open Design Beta 1.2.3-beta.4 win-x64-payload.7z',
+    platform: 'win32',
+    ...overrides,
+  });
+}
+
 describe('UpdaterPopup', () => {
   let restoreHost: (() => void) | null = null;
 
@@ -106,7 +128,7 @@ describe('UpdaterPopup', () => {
     fireEvent.click(button);
 
     expect(await screen.findByRole('dialog', { name: 'Update ready' })).toBeTruthy();
-    expect(screen.getByText('Open Design 1.2.3-beta.4 is ready. Open Design will close and open the installer.')).toBeTruthy();
+    expect(screen.getByText('Open Design 1.2.3-beta.4 is ready. Install it to use the latest version.')).toBeTruthy();
     expect(screen.getByTestId('updater-install-button').textContent).toBe('Install update');
   });
 
@@ -129,7 +151,7 @@ describe('UpdaterPopup', () => {
 
     expect(await screen.findByRole('dialog', { name: '更新已就绪' })).toBeTruthy();
     expect(screen.getByTestId('updater-install-button').textContent).toBe('安装更新');
-    expect(screen.getByText('Open Design 1.2.3-beta.4 已就绪。Open Design 会关闭并打开安装器。')).toBeTruthy();
+    expect(screen.getByText('Open Design 1.2.3-beta.4 已就绪。安装后即可使用最新版本。')).toBeTruthy();
   });
 
   it('dismisses the confirmation prompt before installation starts', async () => {
@@ -177,7 +199,7 @@ describe('UpdaterPopup', () => {
     fireEvent.click(screen.getByTestId('updater-install-button'));
 
     expect(install).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: 'Opening installer...' }).getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Installing update...' }).getAttribute('disabled')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Later' }).getAttribute('disabled')).not.toBeNull();
 
     await act(async () => {
@@ -196,8 +218,40 @@ describe('UpdaterPopup', () => {
     await waitFor(() => expect(quit).toHaveBeenCalledWith({ payload: { source: 'updater-prompt' } }));
     expect(screen.getByTestId('entry-nav-updater')).toBeTruthy();
     expect(screen.getByRole('dialog', { name: 'Update ready' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Opening installer...' }).getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Installing update...' }).getAttribute('disabled')).not.toBeNull();
     expect(screen.getByRole('button', { name: 'Later' }).getAttribute('disabled')).not.toBeNull();
+  });
+
+  it('applies payload updates without quitting for installer handoff', async () => {
+    const install = vi.fn(async () => payloadDownloadedStatus({
+      installResult: {
+        appliedAt: '2026-05-19T00:00:01.000Z',
+        kind: 'payload-apply',
+        openedAt: '2026-05-19T00:00:01.000Z',
+        path: 'C:\\Users\\Nexu\\AppData\\Local\\Programs\\Open Design Beta\\versions\\1.2.3-beta.4',
+        targetVersion: '1.2.3-beta.4',
+      },
+    }));
+    const quit = vi.fn(async () => ({ ok: true as const }));
+    restoreHost = installMockOpenDesignHost({
+      host: {
+        updater: {
+          install,
+          quit,
+          status: vi.fn(async () => payloadDownloadedStatus()),
+        },
+      },
+    });
+
+    render(<UpdaterPopup />);
+
+    fireEvent.click(await screen.findByTestId('entry-nav-updater'));
+    fireEvent.click(screen.getByTestId('updater-install-button'));
+
+    expect(screen.getByRole('button', { name: 'Installing update...' }).getAttribute('disabled')).not.toBeNull();
+    await waitFor(() => expect(install).toHaveBeenCalledWith({ payload: { source: 'updater-prompt' } }));
+    await waitFor(() => expect(screen.queryByTestId('entry-nav-updater')).toBeNull());
+    expect(quit).not.toHaveBeenCalled();
   });
 
   it('recovers the handoff prompt if the app has not closed after the watchdog', async () => {
@@ -231,7 +285,7 @@ describe('UpdaterPopup', () => {
         await Promise.resolve();
       });
 
-      expect(screen.getByRole('button', { name: 'Opening installer...' }).getAttribute('disabled')).not.toBeNull();
+      expect(screen.getByRole('button', { name: 'Installing update...' }).getAttribute('disabled')).not.toBeNull();
 
       act(() => {
         vi.advanceTimersByTime(10_000);

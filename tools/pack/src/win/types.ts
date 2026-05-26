@@ -63,6 +63,7 @@ export type WinPaths = {
   exePath: string;
   installDir: string;
   installedExePath: string;
+  launcherInstallRoot: string;
   installerPayloadPath: string;
   installerScriptPath: string;
   publicDesktopShortcutPath: string;
@@ -89,6 +90,7 @@ export type WinPaths = {
   winIconPath: string;
   unpackedExePath: string;
   unpackedRoot: string;
+  updatePayloadPath: string;
 };
 
 export type WinPackResult = {
@@ -103,6 +105,7 @@ export type WinPackResult = {
   timings: WinPackTiming[];
   to: ToolPackConfig["to"];
   unpackedPath: string | null;
+  updatePayloadPath: string | null;
   webStandaloneHookAuditPath: string | null;
 };
 
@@ -233,6 +236,7 @@ export type WinUninstallResult = {
 export type WinCleanupResult = {
   namespace: string;
   removedOutputRoot: boolean;
+  removedPartialInstallRoot: boolean;
   removedProductUserDataRoot: boolean;
   removedRuntimeNamespaceRoot: boolean;
   removalPlan: WinRemovalTarget[];
@@ -249,6 +253,11 @@ export type WindowsUninstallRegistryEntry = {
   publisher: string | null;
   quietUninstallString: string | null;
   uninstallString: string | null;
+};
+
+export type WindowsAppPathsRegistryEntry = {
+  defaultPath: string | null;
+  keyPath: string;
 };
 
 export type WinResidueObservation = {

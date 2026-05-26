@@ -1,7 +1,8 @@
 use crate::{
     DEFAULT_RUNTIME_ATTEMPT_PATH, DEFAULT_RUNTIME_CONFIG_FILE, LauncherConfig,
     LauncherLifecycleError, RUNTIME_ATTEMPT_SCHEMA_VERSION, RUNTIME_CONFIG_SCHEMA_VERSION,
-    RUNTIME_PLAN_SCHEMA_VERSION, require_non_empty, resolve_config_path,
+    RUNTIME_PLAN_SCHEMA_VERSION, is_clean_relative_descriptor_path, require_non_empty,
+    resolve_config_relative_path,
 };
 use launcher_core::PayloadEntry;
 use launcher_platform::ProcessSpec;
@@ -119,6 +120,7 @@ pub struct RuntimePlan {
     pub logs_root: PathBuf,
     pub namespace: RuntimeNamespace,
     pub namespace_root: PathBuf,
+    pub payload_process: RuntimeProcessPlan,
     pub runtime_root: PathBuf,
     pub schema_version: u32,
     pub selected_root: PathBuf,
@@ -150,12 +152,12 @@ pub struct RuntimeProcessPlan {
 pub fn build_runtime_plan(
     runtime: &RuntimeLaunchPlan,
 ) -> Result<RuntimePlan, LauncherLifecycleError> {
-    if runtime.selected_version.apps.is_empty() {
-        return Err(LauncherLifecycleError::EmptyRuntimeApps);
-    }
-
     let runtime_root_dir = runtime_config_root(&runtime.config_path)?;
-    let namespace_root = resolve_config_path(runtime_root_dir, &runtime.config.namespace_root);
+    let namespace_root = resolve_config_relative_path(
+        runtime_root_dir,
+        &runtime.config.namespace_root,
+        "namespaceRoot",
+    )?;
     let runtime_root = namespace_root.join("runtime");
     let logs_root = namespace_root.join("logs");
     let mut endpoints = BTreeSet::new();
@@ -195,6 +197,7 @@ pub fn build_runtime_plan(
         logs_root,
         namespace: runtime.config.namespace.clone(),
         namespace_root: namespace_root.clone(),
+        payload_process: runtime_process_plan_from_process_spec(&runtime.process),
         runtime_root,
         schema_version: RUNTIME_PLAN_SCHEMA_VERSION,
         selected_root: runtime.selected_root.clone(),
@@ -218,14 +221,16 @@ pub(crate) fn build_runtime_launch_plan(
 ) -> Result<RuntimeLaunchPlan, LauncherLifecycleError> {
     let runtime_path = effective_runtime_path(launcher_config)
         .ok_or(LauncherLifecycleError::MissingRuntimeDescriptor)?;
-    let config_path = resolve_config_path(config_root, runtime_path);
+    let config_path = resolve_config_relative_path(config_root, runtime_path, "runtimePath")?;
     let config = load_runtime_config(&config_path)?;
     let runtime_root_dir = runtime_config_root(&config_path)?;
-    let namespace_root = resolve_config_path(runtime_root_dir, &config.namespace_root);
+    let namespace_root =
+        resolve_config_relative_path(runtime_root_dir, &config.namespace_root, "namespaceRoot")?;
     let attempt_path = launcher_config
         .attempt_path
         .as_deref()
-        .map(|attempt_path| resolve_config_path(config_root, attempt_path))
+        .map(|attempt_path| resolve_config_relative_path(config_root, attempt_path, "attemptPath"))
+        .transpose()?
         .unwrap_or_else(|| namespace_root.join(DEFAULT_RUNTIME_ATTEMPT_PATH));
     let attempt = read_runtime_attempt(&attempt_path)?;
     let last_successful = build_runtime_version_candidate(
@@ -295,7 +300,13 @@ fn build_runtime_version_candidate(
 ) -> Result<RuntimeVersionCandidate, LauncherLifecycleError> {
     require_non_empty(&version.version, "runtime.version")?;
     require_non_empty(&version.root, "runtime.root")?;
-    let root = resolve_config_path(runtime_root, &version.root);
+    let root = resolve_runtime_relative_path(
+        slot,
+        &version.version,
+        runtime_root,
+        &version.root,
+        "root",
+    )?;
     if !root.is_dir() {
         return Err(LauncherLifecycleError::RuntimeVersionRootMissing {
             path: root.display().to_string(),
@@ -337,6 +348,15 @@ fn build_runtime_process_plan(
     build_entry_process(slot, version, version_root, entry)
 }
 
+fn runtime_process_plan_from_process_spec(process: &ProcessSpec) -> RuntimeProcessPlan {
+    RuntimeProcessPlan {
+        args: process.args.clone(),
+        cwd: process.cwd.clone(),
+        env: process.env.clone(),
+        executable: process.executable.clone(),
+    }
+}
+
 fn build_entry_process(
     slot: RuntimeSelectionSlot,
     version: &str,
@@ -348,7 +368,8 @@ fn build_entry_process(
     let cwd = entry
         .cwd
         .as_deref()
-        .map(|cwd| resolve_version_path(version_root, cwd))
+        .map(|cwd| resolve_runtime_relative_path(slot, version, version_root, cwd, "cwd"))
+        .transpose()?
         .unwrap_or_else(|| version_root.to_path_buf());
     if !cwd.is_dir() {
         return Err(LauncherLifecycleError::RuntimeCwdMissing {
@@ -410,13 +431,26 @@ fn runtime_config_root(path: &Path) -> Result<&Path, LauncherLifecycleError> {
     })
 }
 
-fn resolve_version_path(root: &Path, value: &str) -> PathBuf {
-    let path = PathBuf::from(value);
-    if path.is_absolute() {
-        path
-    } else {
-        root.join(path)
+fn resolve_runtime_relative_path(
+    slot: RuntimeSelectionSlot,
+    version: &str,
+    root: &Path,
+    value: &str,
+    field: &'static str,
+) -> Result<PathBuf, LauncherLifecycleError> {
+    if !is_clean_relative_descriptor_path(value) {
+        return Err(LauncherLifecycleError::InvalidRuntimeRelativePath {
+            field,
+            path: value.to_owned(),
+            root: root.display().to_string(),
+            slot,
+            version: version.to_owned(),
+        });
     }
+    if value == "." {
+        return Ok(root.to_path_buf());
+    }
+    Ok(root.join(Path::new(value)))
 }
 
 fn resolve_existing_version_file(
@@ -425,7 +459,7 @@ fn resolve_existing_version_file(
     root: &Path,
     value: &str,
 ) -> Result<PathBuf, LauncherLifecycleError> {
-    let path = resolve_version_path(root, value);
+    let path = resolve_runtime_relative_path(slot, version, root, value, "executable")?;
     if !path.is_file() {
         return Err(LauncherLifecycleError::RuntimeExecutableMissing {
             path: path.display().to_string(),

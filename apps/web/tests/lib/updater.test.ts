@@ -60,10 +60,42 @@ describe('web updater model', () => {
     const model = deriveUpdaterModel(downloadedStatus(), { hostAvailable: true });
     expect(model.environment).toBe('desktop');
     expect(model.shouldPrompt).toBe(true);
+    expect(model.hasDownloadedUpdate).toBe(true);
     expect(model.hasDownloadedInstaller).toBe(true);
+    expect(model.canInstallUpdate).toBe(true);
     expect(model.canOpenInstaller).toBe(true);
     expect(model.shouldShowControl).toBe(true);
     expect(model.promptKey).toContain('1.2.3-beta.4');
+  });
+
+  it('derives a desktop prompt for downloaded payload updates without installer handoff', () => {
+    const model = deriveUpdaterModel(
+      downloadedStatus({
+        artifact: {
+          name: 'Open Design Beta 1.2.3-beta.4 win-x64-payload.7z',
+          platformKey: 'winX64',
+          type: 'payload',
+          url: 'https://fixture.test/Open Design Beta 1.2.3-beta.4 win-x64-payload.7z',
+        },
+        capabilities: {
+          canApplyInPlace: true,
+          canDownload: true,
+          canOpenInstaller: false,
+          requiresManualInstall: false,
+        },
+        downloadPath: 'C:\\Users\\Nexu\\AppData\\Local\\Open Design\\updater\\Open Design Beta 1.2.3-beta.4 win-x64-payload.7z',
+        platform: 'win32',
+      }),
+      { hostAvailable: true },
+    );
+
+    expect(model.canApplyInPlace).toBe(true);
+    expect(model.canOpenInstaller).toBe(false);
+    expect(model.canInstallUpdate).toBe(true);
+    expect(model.hasDownloadedUpdate).toBe(true);
+    expect(model.hasDownloadedInstaller).toBe(false);
+    expect(model.shouldPrompt).toBe(true);
+    expect(model.shouldShowControl).toBe(true);
   });
 
   it('keeps downloading progress internal without showing the updater control', () => {
@@ -100,6 +132,7 @@ describe('web updater model', () => {
     expect(model.shouldShowControl).toBe(false);
     expect(model.shouldPrompt).toBe(false);
     expect(model.upToDate).toBe(true);
+    expect(model.hasDownloadedUpdate).toBe(false);
     expect(model.hasDownloadedInstaller).toBe(false);
   });
 
@@ -129,6 +162,7 @@ describe('web updater model', () => {
     );
 
     expect(model.busy).toBe(false);
+    expect(model.hasDownloadedUpdate).toBe(true);
     expect(model.hasDownloadedInstaller).toBe(true);
     expect(model.shouldPrompt).toBe(true);
     expect(model.downloadProgress).toBeNull();
@@ -146,8 +180,38 @@ describe('web updater model', () => {
       { hostAvailable: true },
     );
     expect(model.installerOpened).toBe(true);
+    expect(model.installResultKind).toBe('installer-open');
     expect(model.canQuitAfterInstallerOpen).toBe(true);
     expect(model.shouldPrompt).toBe(false);
+  });
+
+  it('does not request app quit after an update was applied in place', () => {
+    const model = deriveUpdaterModel(
+      downloadedStatus({
+        capabilities: {
+          canApplyInPlace: true,
+          canDownload: true,
+          canOpenInstaller: false,
+          requiresManualInstall: false,
+        },
+        installResult: {
+          appliedAt: '2026-05-19T00:00:01.000Z',
+          kind: 'payload-apply',
+          openedAt: '2026-05-19T00:00:01.000Z',
+          path: 'C:\\Users\\Nexu\\AppData\\Local\\Programs\\Open Design Beta\\versions\\1.2.3-beta.4',
+          targetVersion: '1.2.3-beta.4',
+        },
+        platform: 'win32',
+      }),
+      { hostAvailable: true },
+    );
+
+    expect(model.installResultKind).toBe('payload-apply');
+    expect(model.installerOpened).toBe(false);
+    expect(model.canQuitAfterInstallerOpen).toBe(false);
+    expect(model.canInstallUpdate).toBe(false);
+    expect(model.shouldPrompt).toBe(false);
+    expect(model.shouldShowControl).toBe(false);
   });
 
   it('routes status, check, download, install, and quit requests through host helpers with flexible payloads', async () => {

@@ -233,6 +233,14 @@ export type DesktopUpdateCapabilitySet = {
 
 export type DesktopUpdatePathSnapshot = {
   downloadRoot?: string;
+  launcherConfigPath?: string;
+  launcherCleanupMarkerPath?: string;
+  launcherInstallMetadataPath?: string;
+  launcherInstallRoot?: string;
+  launcherLockPath?: string;
+  launcherRuntimeConfigPath?: string;
+  launcherSevenZipDllPath?: string;
+  launcherSevenZipPath?: string;
   manifestPath?: string;
 };
 
@@ -261,10 +269,35 @@ export type DesktopUpdateErrorSnapshot = {
   message: string;
 };
 
+export type DesktopUpdateLauncherSelfUpdateResult = {
+  error?: string;
+  helperPath?: string;
+  latestSummaryPath?: string;
+  launcherPath?: string;
+  logPath?: string;
+  ok: boolean;
+  reason?: "schedule-failed" | "unsupported-platform";
+  summaryPath?: string;
+};
+
+export type DesktopUpdateLauncherSelfUpdateStatus = {
+  candidatePath?: string;
+  completedAt?: string;
+  error?: string;
+  latestSummaryPath: string;
+  ok: boolean;
+  status: "failed" | "ok" | "skipped";
+  targetPath?: string;
+};
+
 export type DesktopUpdateInstallResult = {
+  appliedAt?: string;
   dryRun?: boolean;
+  kind?: "installer-open" | "payload-apply";
+  launcherSelfUpdate?: DesktopUpdateLauncherSelfUpdateResult;
   openedAt: string;
   path: string;
+  targetVersion?: string;
 };
 
 export type DesktopUpdateReleaseSnapshot = {
@@ -307,6 +340,7 @@ export type DesktopUpdateStatusSnapshot = {
   incoming?: DesktopUpdateIncomingSnapshot;
   installResult?: DesktopUpdateInstallResult;
   lastCheckedAt?: string;
+  launcherSelfUpdate?: DesktopUpdateLauncherSelfUpdateStatus;
   metadata?: Record<string, unknown>;
   mode: DesktopUpdateMode;
   paths?: DesktopUpdatePathSnapshot;

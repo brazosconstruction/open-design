@@ -113,6 +113,13 @@ export type OpenDesignHostUpdaterCapabilitySet = {
 
 export type OpenDesignHostUpdaterPathSnapshot = {
   downloadRoot?: string;
+  launcherCleanupMarkerPath?: string;
+  launcherInstallMetadataPath?: string;
+  launcherInstallRoot?: string;
+  launcherLockPath?: string;
+  launcherRuntimeConfigPath?: string;
+  launcherSevenZipDllPath?: string;
+  launcherSevenZipPath?: string;
   manifestPath?: string;
 };
 
@@ -141,10 +148,35 @@ export type OpenDesignHostUpdaterErrorSnapshot = {
   message: string;
 };
 
+export type OpenDesignHostUpdaterLauncherSelfUpdateResult = {
+  error?: string;
+  helperPath?: string;
+  latestSummaryPath?: string;
+  launcherPath?: string;
+  logPath?: string;
+  ok: boolean;
+  reason?: "schedule-failed" | "unsupported-platform";
+  summaryPath?: string;
+};
+
+export type OpenDesignHostUpdaterLauncherSelfUpdateStatus = {
+  candidatePath?: string;
+  completedAt?: string;
+  error?: string;
+  latestSummaryPath: string;
+  ok: boolean;
+  status: "failed" | "ok" | "skipped";
+  targetPath?: string;
+};
+
 export type OpenDesignHostUpdaterInstallResult = {
+  appliedAt?: string;
   dryRun?: boolean;
+  kind?: "installer-open" | "payload-apply";
+  launcherSelfUpdate?: OpenDesignHostUpdaterLauncherSelfUpdateResult;
   openedAt: string;
   path: string;
+  targetVersion?: string;
 };
 
 export type OpenDesignHostUpdaterReleaseSnapshot = {
@@ -187,6 +219,7 @@ export type OpenDesignHostUpdaterStatusSnapshot = {
   incoming?: OpenDesignHostUpdaterIncomingSnapshot;
   installResult?: OpenDesignHostUpdaterInstallResult;
   lastCheckedAt?: string;
+  launcherSelfUpdate?: OpenDesignHostUpdaterLauncherSelfUpdateStatus;
   metadata?: Record<string, unknown>;
   mode: OpenDesignHostUpdaterMode;
   paths?: OpenDesignHostUpdaterPathSnapshot;

@@ -8,6 +8,12 @@ import { winResources } from "../resources.js";
 import { PRODUCT_NAME } from "./constants.js";
 import { pathExists } from "./fs.js";
 import { resolveWinInstallIdentity } from "./identity.js";
+import {
+  assembleWinLauncherInstallRoot,
+  buildWinLauncherExecutable,
+  type WinLauncherInstallLayout,
+  writeWinLauncherUpdatePayloadArchive,
+} from "./launcher-layout.js";
 import { readPackagedVersion } from "./manifest.js";
 import { ensureNsisPersianLanguageAlias } from "./nsis.js";
 import { sanitizeNamespace } from "./paths.js";
@@ -427,9 +433,12 @@ Function .onInit
   ReadRegStr $ExistingInstallLocation HKCU "${registryKey}" "InstallLocation"
   StrCpy $RunningInstancesInstallRoot ""
   \${If} $ExistingInstallLocation != ""
-    IfFileExists "$ExistingInstallLocation\\${exeName}" valid_existing_location invalid_existing_location
+    IfFileExists "$ExistingInstallLocation\\${exeName}" valid_existing_location 0
+    IfFileExists "$ExistingInstallLocation\\install.json" valid_existing_location 0
+    IfFileExists "$ExistingInstallLocation\\runtime.json" valid_existing_location 0
+    IfFileExists "$ExistingInstallLocation\\versions\\*.*" valid_existing_location invalid_existing_location
 invalid_existing_location:
-    Push "ignoring registered install location without expected exe: $ExistingInstallLocation"
+    Push "ignoring registered install location without launcher markers: $ExistingInstallLocation"
     Call LogInstallerEvent
     StrCpy $ExistingInstallLocation ""
 valid_existing_location:
@@ -437,8 +446,10 @@ valid_existing_location:
 
   IfSilent silent_check no_existing_install
 silent_check:
-  IfFileExists "$INSTDIR\\${exeName}" 0 silent_detect_running_instances
-  StrCpy $RunningInstancesInstallRoot "$INSTDIR"
+  Call SetInstallRootExistsFlag
+  \${If} $LX != 0
+    StrCpy $RunningInstancesInstallRoot "$INSTDIR"
+  \${EndIf}
 silent_detect_running_instances:
   Call DetectRunningInstances
   \${If} $RunningInstancesOutput != ""
@@ -453,7 +464,11 @@ silent_detect_running_instances:
     \${EndIf}
   \${EndIf}
 
-  IfFileExists "$INSTDIR\\${exeName}" existing_install no_existing_install
+  Call SetInstallRootExistsFlag
+  \${If} $LX != 0
+    Goto existing_install
+  \${EndIf}
+  Goto no_existing_install
 existing_install:
   IfSilent 0 no_existing_install
     Push "$(ExistingInstallSilentOverwrite)"
@@ -511,8 +526,10 @@ FunctionEnd
 
 Function GuardRunningInstancesBeforeInstall
   StrCpy $RunningInstancesInstallRoot ""
-  IfFileExists "$INSTDIR\\${exeName}" 0 detect_running_instances
-  StrCpy $RunningInstancesInstallRoot "$INSTDIR"
+  Call SetInstallRootExistsFlag
+  \${If} $LX != 0
+    StrCpy $RunningInstancesInstallRoot "$INSTDIR"
+  \${EndIf}
 detect_running_instances:
   Call DetectRunningInstances
   \${If} $RunningInstancesOutput == ""
@@ -532,9 +549,11 @@ FunctionEnd
 
 Function DirectoryPageLeave
   IfSilent done
-  IfFileExists "$INSTDIR\\${exeName}" existing_install done
-existing_install:
-  MessageBox MB_OKCANCEL|MB_ICONQUESTION "$(ExistingInstallMessage)$\\r$\\n$\\r$\\n$INSTDIR" IDOK done IDCANCEL cancel_install
+  Call SetInstallRootExistsFlag
+  \${If} $LX != 0
+    MessageBox MB_OKCANCEL|MB_ICONQUESTION "$(ExistingInstallMessage)$\\r$\\n$\\r$\\n$INSTDIR" IDOK done IDCANCEL cancel_install
+  \${EndIf}
+  Goto done
 cancel_install:
   Push "install cancelled at existing install confirmation"
   Call LogInstallerEvent
@@ -550,6 +569,32 @@ Function CreateDesktopShortcut
   !insertmacro LOG_PATH_STATE "desktop_shortcut_after_create" "$DESKTOP\\${shortcutName}"
 FunctionEnd
 
+Function GuardInstallRootLockBeforeFileChanges
+  Push $0
+  System::Call 'kernel32::GetFileAttributes(t "$INSTDIR\\state\\lock") i .r0'
+  \${If} $0 != -1
+    Pop $0
+    Push "install aborted: launcher install root lock exists at $INSTDIR\\state\\lock"
+    Call LogInstallerEvent
+    SetErrorLevel 1
+    Abort "Open Design is currently updating this installation. Please close Open Design and try again."
+  \${EndIf}
+  Pop $0
+FunctionEnd
+
+Function SetInstallRootExistsFlag
+  Push $0
+  StrCpy $LX 0
+  System::Call 'kernel32::GetFileAttributes(t "$INSTDIR") i .r0'
+  \${If} $0 != -1
+    IntOp $0 $0 & 16
+    \${If} $0 != 0
+      StrCpy $LX 1
+    \${EndIf}
+  \${EndIf}
+  Pop $0
+FunctionEnd
+
 Function RemoveInstallDir
   !insertmacro LOG_PATH_STATE "install_dir_before_remove" "$INSTDIR"
   Push $0
@@ -557,6 +602,14 @@ Function RemoveInstallDir
   Pop $0
   Push "install dir remove exit=$0"
   Call LogInstallerEvent
+  System::Call 'kernel32::GetFileAttributes(t "$INSTDIR") i .r0'
+  \${If} $0 != -1
+    Pop $0
+    Push "install aborted: failed to remove existing install dir at $INSTDIR"
+    Call LogInstallerEvent
+    SetErrorLevel 1
+    Abort "Failed to remove the existing Open Design installation. Close Open Design and try again."
+  \${EndIf}
   Pop $0
   !insertmacro LOG_PATH_STATE "install_dir_after_remove" "$INSTDIR"
 FunctionEnd
@@ -590,6 +643,19 @@ Function un.UninstallOptionsPageLeave
 done:
 FunctionEnd
 
+Function un.GuardInstallRootLockBeforeFileChanges
+  Push $0
+  System::Call 'kernel32::GetFileAttributes(t "$INSTDIR\\state\\lock") i .r0'
+  \${If} $0 != -1
+    Pop $0
+    Push "uninstall aborted: launcher install root lock exists at $INSTDIR\\state\\lock"
+    Call un.LogInstallerEvent
+    SetErrorLevel 1
+    Abort "Open Design is currently updating this installation. Please close Open Design and try again."
+  \${EndIf}
+  Pop $0
+FunctionEnd
+
 Function un.RemoveInstallDirContents
   !insertmacro UN_LOG_PATH_STATE "install_dir_before_remove" "$INSTDIR"
   Push $0
@@ -597,6 +663,14 @@ Function un.RemoveInstallDirContents
   Pop $0
   Push "install dir fast remove exit=$0"
   Call un.LogInstallerEvent
+  System::Call 'kernel32::GetFileAttributes(t "$INSTDIR") i .r0'
+  \${If} $0 != -1
+    Pop $0
+    Push "uninstall aborted: failed to remove install dir at $INSTDIR"
+    Call un.LogInstallerEvent
+    SetErrorLevel 1
+    Abort "Failed to remove the Open Design installation. Close Open Design and try again."
+  \${EndIf}
   Pop $0
   !insertmacro UN_LOG_PATH_STATE "install_dir_after_remove" "$INSTDIR"
 FunctionEnd
@@ -617,11 +691,14 @@ Section "Install"
   Push "install section start"
   Call LogInstallerEvent
   Call GuardRunningInstancesBeforeInstall
+  Call GuardInstallRootLockBeforeFileChanges
   !insertmacro LOG_PATH_STATE "install_dir_before_install" "$INSTDIR"
   !insertmacro LOG_PATH_STATE "installed_exe_before_install" "$INSTDIR\\${exeName}"
 
-  IfFileExists "$INSTDIR\\${exeName}" 0 prepare_install_dir
-  Call RemoveInstallDir
+  Call SetInstallRootExistsFlag
+  \${If} $LX != 0
+    Call RemoveInstallDir
+  \${EndIf}
 
 prepare_install_dir:
   InitPluginsDir
@@ -672,6 +749,7 @@ Section "Uninstall"
   SetShellVarContext current
   Push "uninstall section start"
   Call un.LogInstallerEvent
+  Call un.GuardInstallRootLockBeforeFileChanges
   IfSilent delete_desktop_shortcut check_desktop_shortcut_state
 check_desktop_shortcut_state:
   \${If} $RemoveDesktopShortcutState == \${BST_CHECKED}
@@ -705,19 +783,20 @@ SectionEnd
 export async function buildCustomWinNsisInstaller(
   config: ToolPackConfig,
   paths: WinPaths,
-  builtApp: WinBuiltAppManifest,
-): Promise<void> {
+  launcherLayout: WinLauncherInstallLayout,
+): Promise<WinLauncherInstallLayout> {
   if (process.platform !== "win32") throw new Error("Windows installer build must run on Windows");
   const makensisCommand = await resolveMakensisCommand(config);
   const packagedVersion = await readPackagedVersion(config);
   await ensureNsisPersianLanguageAlias(config);
+  const launcherInstallRoot = launcherLayout.root;
 
   await mkdir(dirname(paths.installerPayloadPath), { recursive: true });
   await mkdir(dirname(paths.setupPath), { recursive: true });
   await rm(paths.installerPayloadPath, { force: true });
   await rm(paths.setupPath, { force: true });
   await execFileAsync(winResources.sevenZipExe, ["a", "-t7z", "-mx=1", "-ms=off", paths.installerPayloadPath, ".\\*"], {
-    cwd: builtApp.unpackedRoot,
+    cwd: launcherInstallRoot,
     windowsHide: true,
   });
   await stat(paths.installerPayloadPath);
@@ -737,4 +816,24 @@ export async function buildCustomWinNsisInstaller(
     windowsHide: true,
   });
   await stat(paths.setupPath);
+  return launcherLayout;
+}
+
+export async function buildWinLauncherInstallRootArtifacts(
+  config: ToolPackConfig,
+  paths: WinPaths,
+  builtApp: WinBuiltAppManifest,
+): Promise<WinLauncherInstallLayout> {
+  if (process.platform !== "win32") throw new Error("Windows launcher install root build must run on Windows");
+  const packagedVersion = await readPackagedVersion(config);
+  const launcherExecutablePath = await buildWinLauncherExecutable(config, paths);
+  const launcherLayout = await assembleWinLauncherInstallRoot({
+    builtApp,
+    config,
+    launcherExecutablePath,
+    packagedVersion,
+    paths,
+  });
+  await writeWinLauncherUpdatePayloadArchive({ layout: launcherLayout, paths });
+  return launcherLayout;
 }

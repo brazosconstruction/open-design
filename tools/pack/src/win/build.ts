@@ -96,6 +96,7 @@ export async function packWin(config: ToolPackConfig): Promise<WinPackResult> {
     timings,
     to: config.to,
     unpackedPath: builtApp?.unpackedRoot ?? ((await pathExists(paths.unpackedRoot)) ? paths.unpackedRoot : null),
+    updatePayloadPath: (await pathExists(paths.updatePayloadPath)) ? paths.updatePayloadPath : null,
     webStandaloneHookAuditPath: (await pathExists(paths.webStandaloneHookAuditPath)) ? paths.webStandaloneHookAuditPath : null,
   };
 }

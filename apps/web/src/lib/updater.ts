@@ -30,8 +30,10 @@ export type UpdaterActionResult =
 export type UpdaterModel = {
   availableVersion: string | null;
   busy: boolean;
+  canApplyInPlace: boolean;
   canCheck: boolean;
   canDownload: boolean;
+  canInstallUpdate: boolean;
   canOpenInstaller: boolean;
   canQuitAfterInstallerOpen: boolean;
   currentVersion: string | null;
@@ -40,6 +42,8 @@ export type UpdaterModel = {
   environment: UpdaterEnvironment;
   errorMessage: string | null;
   hasDownloadedInstaller: boolean;
+  hasDownloadedUpdate: boolean;
+  installResultKind: 'installer-open' | 'payload-apply' | null;
   installerOpened: boolean;
   promptKey: string | null;
   upToDate: boolean;
@@ -100,11 +104,19 @@ export function deriveUpdaterModel(
     status.supported &&
     status.capabilities.canOpenInstaller,
   );
-  const hasDownloadedInstaller = Boolean(
+  const canApplyInPlace = Boolean(
+    hostAvailable &&
+    status?.enabled &&
+    status.supported &&
+    status.capabilities.canApplyInPlace,
+  );
+  const hasDownloadedUpdate = Boolean(
     state === OPEN_DESIGN_HOST_UPDATER_STATES.DOWNLOADED &&
     status?.downloadPath,
   );
-  const installerOpened = status?.installResult != null;
+  const installResultKind = status?.installResult?.kind ?? (status?.installResult != null ? 'installer-open' : null);
+  const installerOpened = installResultKind === 'installer-open';
+  const hasDownloadedInstaller = hasDownloadedUpdate && canOpenInstaller;
   const availableVersion = status?.availableVersion ?? null;
   const currentVersion = status?.currentVersion ?? null;
   const downloadProgress = downloadProgressFromStatus(status);
@@ -119,13 +131,16 @@ export function deriveUpdaterModel(
           status.downloadPath ?? status.artifactUrl ?? status.artifact?.url ?? 'unknown-artifact',
         ].join(':');
   const canQuitAfterInstallerOpen = hostAvailable && installerOpened;
-  const shouldShowControl = Boolean(canOpenInstaller && hasDownloadedInstaller && !installerOpened);
+  const canInstallUpdate = Boolean((canOpenInstaller || canApplyInPlace) && hasDownloadedUpdate && installResultKind == null);
+  const shouldShowControl = canInstallUpdate;
 
   return {
     availableVersion,
     busy,
+    canApplyInPlace,
     canCheck: hostAvailable && Boolean(status?.enabled) && !busy,
     canDownload: hostAvailable && Boolean(status?.enabled && status.capabilities.canDownload) && !busy,
+    canInstallUpdate,
     canOpenInstaller,
     canQuitAfterInstallerOpen,
     currentVersion,
@@ -134,11 +149,13 @@ export function deriveUpdaterModel(
     environment,
     errorMessage: status?.error?.message ?? null,
     hasDownloadedInstaller,
+    hasDownloadedUpdate,
+    installResultKind,
     installerOpened,
     promptKey,
     upToDate,
     shouldShowControl,
-    shouldPrompt: canOpenInstaller && hasDownloadedInstaller && !installerOpened,
+    shouldPrompt: canInstallUpdate,
     status,
     supported: Boolean(status?.supported),
   };

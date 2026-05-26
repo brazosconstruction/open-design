@@ -1,6 +1,6 @@
 import { readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 
 import {
   APP_KEYS,
@@ -9,7 +9,10 @@ import {
 } from "@open-design/sidecar-proto";
 import { describe, expect, it } from "vitest";
 
-import { writePackagedDesktopIdentity } from "../src/identity.js";
+import {
+  resolvePackagedDesktopAppPath,
+  writePackagedDesktopIdentity,
+} from "../src/identity.js";
 import type { PackagedNamespacePaths } from "../src/paths.js";
 
 async function pathExists(path: string): Promise<boolean> {
@@ -43,6 +46,19 @@ function fakePaths(root: string): PackagedNamespacePaths {
 }
 
 describe("packaged identity markers", () => {
+  it("reports the launcher install root as the desktop app path for versioned Windows payloads", () => {
+    const installRoot = "C:\\Users\\Ada\\AppData\\Local\\Programs\\Open Design Beta";
+    const executablePath = win32.join(installRoot, "versions", "0.8.0-beta.2", "payload", "Open Design.exe");
+
+    expect(resolvePackagedDesktopAppPath(executablePath)).toBe(installRoot);
+  });
+
+  it("keeps the existing .app bundle fallback outside launcher installs", () => {
+    expect(resolvePackagedDesktopAppPath("/Applications/Open Design.app/Contents/MacOS/Open Design")).toBe(
+      "/Applications/Open Design.app",
+    );
+  });
+
   it("can write and close the desktop identity shape at the headless marker path", async () => {
     const root = join(tmpdir(), `od-packaged-identity-${process.pid}-${Date.now()}`);
     const paths = fakePaths(root);

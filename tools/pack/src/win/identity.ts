@@ -47,13 +47,14 @@ function sanitizeNamespace(value: string): string {
 
 export function resolveWinInstallIdentity(config: Pick<ToolPackConfig, "namespace" | "appVersion">): WinInstallIdentity {
   const namespaceToken = sanitizeNamespace(config.namespace);
-  const channel = channelFromVersion(config.appVersion) ?? channelFromNamespace(config.namespace);
+  const namespaceChannel = channelFromNamespace(config.namespace);
+  const channel = namespaceChannel == null ? null : channelFromVersion(config.appVersion) ?? namespaceChannel;
   const displayName = channel == null ? `${PRODUCT_NAME} ${namespaceToken}` : displayNameForChannel(channel);
 
   return {
     appPathsKey: `Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${displayName}.exe`,
     displayName,
-    exeName: `${PRODUCT_NAME}.exe`,
+    exeName: `${displayName}.exe`,
     registryKey: `Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${PRODUCT_NAME}-${namespaceToken}`,
     shortcutName: `${displayName}.lnk`,
     uninstallerName: `Uninstall ${displayName}.exe`,
