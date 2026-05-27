@@ -320,7 +320,7 @@ describe('ExamplesTab', () => {
     expect(modal.classList.contains('ds-modal-fullscreen')).toBe(false);
     expect(within(dialog).getByRole('button', { name: /Fullscreen/i })).toBeTruthy();
 
-    const shareButton = within(dialog).getByRole('button', { name: 'Share ▾' });
+    const shareButton = within(dialog).getByRole('button', { name: /Share/i });
     fireEvent.click(shareButton);
     fireEvent.click(within(dialog).getByRole('menuitem', { name: /Export as PDF/i }));
     expect(exportAsPdf).toHaveBeenCalledWith(
