@@ -1,6 +1,17 @@
 import { execAgentFile } from './shared.js';
 import type { RuntimeAgentDef, RuntimeModelOption } from '../types.js';
 
+const PREFERRED_AMR_CHAT_MODEL_ORDER = [
+  'deepseek-v4-flash',
+  'deepseek-v3.2',
+  'glm-5.1',
+  'gemini-2.5-flash',
+] as const;
+
+const PREFERRED_AMR_CHAT_MODEL_RANK: ReadonlyMap<string, number> = new Map(
+  PREFERRED_AMR_CHAT_MODEL_ORDER.map((id, index) => [id, index]),
+);
+
 // AMR is the vela CLI's ACP stdio mode. `vela agent run --runtime opencode`
 // starts a private OpenCode server and forwards stream-json over ACP JSON-RPC.
 // Required env (set on the daemon process or via Settings → CLI env):
@@ -92,7 +103,22 @@ export function parseVelaModels(stdout: string): RuntimeModelOption[] {
     seen.add(id);
     models.push({ id, label: id });
   }
-  return models;
+  return orderAmrChatModels(models);
+}
+
+function orderAmrChatModels(
+  models: RuntimeModelOption[],
+): RuntimeModelOption[] {
+  return models
+    .map((model, index) => ({ model, index }))
+    .sort((a, b) => {
+      const aRank =
+        PREFERRED_AMR_CHAT_MODEL_RANK.get(a.model.id) ?? Number.MAX_SAFE_INTEGER;
+      const bRank =
+        PREFERRED_AMR_CHAT_MODEL_RANK.get(b.model.id) ?? Number.MAX_SAFE_INTEGER;
+      return aRank - bRank || a.index - b.index;
+    })
+    .map(({ model }) => model);
 }
 
 export const amrAgentDef = {

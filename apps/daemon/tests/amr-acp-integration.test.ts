@@ -102,9 +102,11 @@ describe('AMR runtime def', () => {
     expect(normalizeVelaModelId('vela/deepseek-v3.2')).toBe('deepseek-v3.2');
   });
 
-  it('parses `vela models` output with plain canonical labels', () => {
+  it('parses `vela models` output with fast chat defaults and plain canonical labels', () => {
     const models = parseVelaModels([
+      'public_model_claude_opus_4_6  vela',
       'public_model_deepseek_v3_2    vela',
+      'public_model_deepseek_v4_flash    vela',
       'public_model_glm_5_1          vela',
       'public_model_gpt_image_2      vela',
       'vela/kimi-k2.6                vela',
@@ -113,8 +115,10 @@ describe('AMR runtime def', () => {
       '',
     ].join('\n'));
     expect(models).toEqual([
+      { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' },
       { id: 'deepseek-v3.2', label: 'deepseek-v3.2' },
       { id: 'glm-5.1', label: 'glm-5.1' },
+      { id: 'claude-opus-4-6', label: 'claude-opus-4-6' },
       { id: 'kimi-k2.6', label: 'kimi-k2.6' },
     ]);
     expect(models.every((model) => !model.label.includes('vela/'))).toBe(true);
@@ -125,16 +129,16 @@ describe('AMR runtime def', () => {
   it('fetches AMR picker models from `vela models`', async () => {
     const models = await amrAgentDef.fetchModels?.(FAKE_VELA, process.env);
     expect(models).toEqual([
-      { id: 'deepseek-v3.2', label: 'deepseek-v3.2' },
       { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' },
-      { id: 'deepseek-v4-pro', label: 'deepseek-v4-pro' },
+      { id: 'deepseek-v3.2', label: 'deepseek-v3.2' },
+      { id: 'glm-5.1', label: 'glm-5.1' },
       { id: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
+      { id: 'deepseek-v4-pro', label: 'deepseek-v4-pro' },
       { id: 'gemini-3.1-flash-lite-preview', label: 'gemini-3.1-flash-lite-preview' },
       { id: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview' },
       { id: 'gpt-5.4', label: 'gpt-5.4' },
       { id: 'gpt-5.4-mini', label: 'gpt-5.4-mini' },
       { id: 'glm-5', label: 'glm-5' },
-      { id: 'glm-5.1', label: 'glm-5.1' },
       { id: 'kimi-k2.6', label: 'kimi-k2.6' },
       { id: 'minimax-m2.7', label: 'minimax-m2.7' },
       { id: 'qwen3-235b-a22b', label: 'qwen3-235b-a22b' },
