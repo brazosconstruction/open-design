@@ -148,13 +148,14 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
       });
     }
 
+    let task: ReturnType<typeof createMediaTask> | null = null;
     try {
       const projectId = req.params.id;
       const project = getProject(db, projectId);
       if (!project) return res.status(404).json({ error: 'project not found' });
 
       const taskId = randomUUID();
-      const task = createMediaTask(taskId, projectId, {
+      task = createMediaTask(taskId, projectId, {
         surface: req.body?.surface,
         model: req.body?.model,
       });
@@ -165,9 +166,9 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
           `compositionDir=${req.body?.compositionDir ? 'yes' : 'no'}`,
       );
 
+      const proxyDispatcher = proxyDispatcherRequestInit();
       task.status = 'running';
       persistMediaTask(task);
-      const proxyDispatcher = proxyDispatcherRequestInit();
       generateMedia({
         projectRoot: PROJECT_ROOT,
         projectsRoot: PROJECTS_DIR,
@@ -229,6 +230,17 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
         startedAt: task.startedAt,
       });
     } catch (err: any) {
+      if (task) {
+        task.status = 'failed';
+        task.error = {
+          message: String(err && err.message ? err.message : err),
+          status: typeof err?.status === 'number' ? err.status : 400,
+          code: err?.code,
+        };
+        task.endedAt = Date.now();
+        persistMediaTask(task);
+        notifyTaskWaiters(task);
+      }
       const status = typeof err?.status === 'number' ? err.status : 400;
       const code = err?.code;
       const body: any = { error: String(err && err.message ? err.message : err) };

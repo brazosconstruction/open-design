@@ -17,7 +17,6 @@ import {
   readProcessStampFromCommand,
   removePathBestEffort,
   resolveSystemProxyEnv,
-  resolveSystemProxyEnvCached,
   wellKnownUserToolchainBins,
   type ProcessStampContract,
 } from "../src/index.js";
@@ -397,29 +396,6 @@ HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settin
 
     expect(first.HTTP_PROXY).toBe("http://127.0.0.1:8001");
     expect(second.HTTP_PROXY).toBe("http://127.0.0.1:8002");
-    expect(callCount).toBe(2);
-  });
-
-  it("caches system proxy resolution within the TTL and refreshes on demand", () => {
-    const values = [
-      "\n<dictionary> {\n  HTTPEnable : 1\n  HTTPPort : 8001\n  HTTPProxy : 127.0.0.1\n}\n",
-      "\n<dictionary> {\n  HTTPEnable : 1\n  HTTPPort : 8002\n  HTTPProxy : 127.0.0.1\n}\n",
-    ];
-    let callCount = 0;
-    const runCommand = () => values[callCount++] ?? values.at(-1) ?? "";
-
-    const first = resolveSystemProxyEnvCached({ platform: "darwin", runCommand, ttlMs: 10_000 });
-    const second = resolveSystemProxyEnvCached({ platform: "darwin", runCommand, ttlMs: 10_000 });
-    const refreshed = resolveSystemProxyEnvCached({
-      platform: "darwin",
-      refresh: true,
-      runCommand,
-      ttlMs: 10_000,
-    });
-
-    expect(first.HTTP_PROXY).toBe("http://127.0.0.1:8001");
-    expect(second.HTTP_PROXY).toBe("http://127.0.0.1:8001");
-    expect(refreshed.HTTP_PROXY).toBe("http://127.0.0.1:8002");
     expect(callCount).toBe(2);
   });
 

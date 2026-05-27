@@ -80,8 +80,8 @@ test('spawnEnvForAgent applies system proxy env to all agent runtimes before bas
   assert.equal(env.PATH, '/usr/bin');
 });
 
-test('spawnEnvForAgent refreshes system proxy env for each default agent launch', () => {
-  const proxySpy = vi.spyOn(platform, 'resolveSystemProxyEnvCached').mockReturnValue({
+test('spawnEnvForAgent resolves system proxy env for each default agent launch', () => {
+  const proxySpy = vi.spyOn(platform, 'resolveSystemProxyEnv').mockReturnValue({
     HTTPS_PROXY: 'http://system-https:7891',
     NODE_USE_ENV_PROXY: '1',
   });
@@ -89,7 +89,7 @@ test('spawnEnvForAgent refreshes system proxy env for each default agent launch'
   try {
     const env = spawnEnvForAgent('gemini', { PATH: '/usr/bin' });
 
-    assert.deepEqual(proxySpy.mock.calls, [[{ refresh: true }]]);
+    assert.deepEqual(proxySpy.mock.calls, [[]]);
     assert.equal(env.HTTPS_PROXY, 'http://system-https:7891');
     assert.equal(env.PATH, '/usr/bin');
   } finally {

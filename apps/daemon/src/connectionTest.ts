@@ -31,7 +31,7 @@ import {
 import {
   createCommandInvocation,
   mergeProxyAwareEnv,
-  resolveSystemProxyEnvCached,
+  resolveSystemProxyEnv,
 } from '@open-design/platform';
 import { attachAcpSession } from './acp.js';
 import { attachPiRpcSession } from './pi-rpc.js';
@@ -238,7 +238,7 @@ function buildConnectionTestProxyDispatcher(
 ): EnvHttpProxyAgent | null {
   const proxyEnv = mergeProxyAwareEnv(
     process.platform,
-    resolveSystemProxyEnvCached({ refresh: true }),
+    resolveSystemProxyEnv(),
     env,
   );
   const allProxy = proxyEnv.ALL_PROXY ?? proxyEnv.all_proxy;

@@ -86,11 +86,6 @@ export type ResolveSystemProxyEnvOptions = {
   runCommand?: SystemProxyCommandRunner;
 };
 
-export type ResolveSystemProxyEnvCachedOptions = ResolveSystemProxyEnvOptions & {
-  refresh?: boolean;
-  ttlMs?: number;
-};
-
 type WindowsProcessRecord = {
   CommandLine?: string | null;
   ParentProcessId?: number | string | null;
@@ -104,18 +99,6 @@ const CANONICAL_PROXY_ENV_KEYS = new Map<string, "ALL_PROXY" | "HTTP_PROXY" | "H
   ["node_use_env_proxy", "NODE_USE_ENV_PROXY"],
   ["no_proxy", "NO_PROXY"],
 ]);
-
-const DEFAULT_SYSTEM_PROXY_CACHE_TTL_MS = 10_000;
-
-type SystemProxyCacheEntry = {
-  expiresAt: number;
-  value: NodeJS.ProcessEnv;
-};
-
-const systemProxyEnvCache = new WeakMap<
-  SystemProxyCommandRunner,
-  Map<NodeJS.Platform, SystemProxyCacheEntry>
->();
 
 function defaultSystemProxyCommandRunner(command: string, args: string[]): string {
   return execFileSync(command, args, {
@@ -424,39 +407,6 @@ export function resolveSystemProxyEnv(options: ResolveSystemProxyEnvOptions = {}
     return {};
   }
   return {};
-}
-
-export function resolveSystemProxyEnvCached(
-  options: ResolveSystemProxyEnvCachedOptions = {},
-): NodeJS.ProcessEnv {
-  const ttlMs = options.ttlMs ?? DEFAULT_SYSTEM_PROXY_CACHE_TTL_MS;
-  if (!(ttlMs > 0)) {
-    const { refresh: _refresh, ttlMs: _ttlMs, ...resolveOptions } = options;
-    void _refresh;
-    void _ttlMs;
-    return resolveSystemProxyEnv(resolveOptions);
-  }
-
-  const platform = options.platform ?? process.platform;
-  const runCommand = options.runCommand ?? defaultSystemProxyCommandRunner;
-  let cacheByPlatform = systemProxyEnvCache.get(runCommand);
-  if (!cacheByPlatform) {
-    cacheByPlatform = new Map<NodeJS.Platform, SystemProxyCacheEntry>();
-    systemProxyEnvCache.set(runCommand, cacheByPlatform);
-  }
-
-  const now = Date.now();
-  const cached = cacheByPlatform.get(platform);
-  if (!options.refresh && cached && cached.expiresAt > now) {
-    return { ...cached.value };
-  }
-
-  const resolved = resolveSystemProxyEnv({ platform, runCommand });
-  cacheByPlatform.set(platform, {
-    expiresAt: now + ttlMs,
-    value: { ...resolved },
-  });
-  return { ...resolved };
 }
 
 export function createProcessStampArgs<TStamp extends ProcessStampShape>(

@@ -134,7 +134,7 @@ describe('API proxy routes', () => {
       response: sseResponse('data: [DONE]\n\n'),
     },
   ])('uses the live proxy dispatcher for $provider proxy requests', async ({ path, body, response }) => {
-    const proxySpy = vi.spyOn(platform, 'resolveSystemProxyEnvCached').mockReturnValue({
+    const proxySpy = vi.spyOn(platform, 'resolveSystemProxyEnv').mockReturnValue({
       HTTPS_PROXY: 'http://system-proxy.internal:8443',
       NODE_USE_ENV_PROXY: '1',
     });

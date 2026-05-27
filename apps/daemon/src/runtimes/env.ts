@@ -1,4 +1,4 @@
-import { mergeProxyAwareEnv, resolveSystemProxyEnvCached } from '@open-design/platform';
+import { mergeProxyAwareEnv, resolveSystemProxyEnv } from '@open-design/platform';
 import { expandConfiguredEnv } from './paths.js';
 
 type RuntimeEnvMap = NodeJS.ProcessEnv | Record<string, string>;
@@ -33,7 +33,7 @@ export function spawnEnvForAgent(
   agentId: string,
   baseEnv: RuntimeEnvMap,
   configuredEnv: unknown = {},
-  systemProxyEnv: RuntimeEnvMap = resolveSystemProxyEnvCached({ refresh: true }),
+  systemProxyEnv: RuntimeEnvMap = resolveSystemProxyEnv(),
 ): NodeJS.ProcessEnv {
   const env = mergeProxyAwareEnv(
     process.platform,
