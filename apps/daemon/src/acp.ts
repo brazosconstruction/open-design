@@ -490,14 +490,21 @@ export function attachAcpSession({
     );
   };
 
-  const fail = (message: string) => {
+  const fail = (
+    message: string,
+    options: { forceModelUnavailable?: boolean } = {},
+  ) => {
     if (finished) return;
     finished = true;
     fatal = true;
     clearStageTimer();
-    send('error', modelUnavailableErrorCode && isModelUnavailableError(message)
-      ? amrModelUnavailablePayload(message)
-      : { message });
+    const useModelUnavailable =
+      modelUnavailableErrorCode &&
+      (options.forceModelUnavailable || isModelUnavailableError(message));
+    send(
+      'error',
+      useModelUnavailable ? amrModelUnavailablePayload(message) : { message },
+    );
     if (!child.killed) child.kill('SIGTERM');
   };
 
@@ -664,8 +671,11 @@ export function attachAcpSession({
       return;
     }
     if (promptRequestId !== null && obj.id === promptRequestId) {
-      if (!emittedTextChunk) {
-        fail('ACP session completed without producing any assistant text. Refresh the AMR model list, choose a supported model, and retry this run.');
+      if (!emittedTextChunk && modelUnavailableErrorCode) {
+        fail(
+          'ACP session completed without producing any assistant text. Refresh the AMR model list, choose a supported model, and retry this run.',
+          { forceModelUnavailable: true },
+        );
         return;
       }
       const usage = formatUsage(result.usage);

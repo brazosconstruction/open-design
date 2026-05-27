@@ -1148,6 +1148,41 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     ).toBeTruthy();
   });
 
+  it('uses the existing Settings card picker for AMR without exposing custom stale models', () => {
+    renderSettingsDialog(
+      {
+        mode: 'daemon',
+        agentId: 'amr',
+        agentModels: { amr: { model: 'gpt-5.4-mini', reasoning: 'default' } },
+      },
+      {
+        agents: [
+          {
+            ...amrAgent,
+            modelsSource: 'live',
+            models: [
+              { id: 'glm-5', label: 'GLM 5' },
+              { id: 'glm-5.1', label: 'GLM 5.1' },
+            ],
+          },
+        ],
+      },
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Local CLI/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Open Design AMR\b/ }));
+
+    const modelPickers = screen.getAllByRole('combobox', {
+      name: en['settings.modelPicker'],
+    }) as HTMLSelectElement[];
+    expect(modelPickers).toHaveLength(1);
+    expect(modelPickers[0]?.value).toBe('glm-5');
+    expect(
+      Array.from(modelPickers[0]?.options ?? []).map((option) => option.value),
+    ).toEqual(['glm-5', 'glm-5.1']);
+    expect(screen.queryByLabelText(en['settings.modelCustomLabel'])).toBeNull();
+  });
+
   it('shows an empty state when no local CLI agents are detected', () => {
     renderSettingsDialog(
       { mode: 'daemon', agentId: null },

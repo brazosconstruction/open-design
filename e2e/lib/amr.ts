@@ -122,6 +122,11 @@ if (argv[2] === 'login') {
   exit(0);
 }
 
+if (argv[2] === 'models') {
+  stdout.write('public_model_glm_5    vela\\n');
+  exit(0);
+}
+
 if (REQUIRE_LOGIN && !hasRuntimeKey()) {
   stderr.write('AMR login missing or expired. Please sign in again.\\n');
   exit(1);
@@ -151,8 +156,8 @@ function handle(msg) {
       protocolVersion: 1,
       agentCapabilities: { promptCapabilities: { text: true } },
       models: {
-        currentModelId: 'gpt-5.4-mini',
-        availableModels: [{ modelId: 'gpt-5.4-mini', name: 'gpt-5.4-mini' }],
+        currentModelId: 'glm-5',
+        availableModels: [{ modelId: 'glm-5', name: 'glm-5' }],
       },
     });
     return;
@@ -161,8 +166,8 @@ function handle(msg) {
     writeResult(id, {
       sessionId: SESSION_ID,
       models: {
-        currentModelId: 'gpt-5.4-mini',
-        availableModels: [{ modelId: 'gpt-5.4-mini', name: 'gpt-5.4-mini' }],
+        currentModelId: 'glm-5',
+        availableModels: [{ modelId: 'glm-5', name: 'glm-5' }],
       },
     });
     return;
