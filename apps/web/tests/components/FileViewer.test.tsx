@@ -1438,6 +1438,8 @@ describe('FileViewer tweaks toolbar', () => {
     const labels: Partial<Record<keyof Dict, string>> = {
       'chat.tabComments': 'Comments',
       'chat.comments.emptySaved': 'No saved comments.',
+      'chat.comments.targetText': 'Text',
+      'chat.comments.targetLink': 'Link',
       'common.close': 'Close',
       'preview.showSidebar': 'Show Comments',
       'preview.hideSidebar': 'Hide Comments',
@@ -2117,6 +2119,45 @@ describe('FileViewer tweaks toolbar', () => {
     expect(screen.queryByText('不要github，换成微信')).toBeNull();
     expect(screen.queryByTestId('comment-side-selectbar')).toBeNull();
     expect(screen.queryByTestId('comment-side-collapsed-rail')).toBeNull();
+  });
+
+  it('does not classify text labels containing a standalone article as links', () => {
+    const comment: PreviewComment = {
+      id: 'comment-plain-text',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'copy-1',
+      selector: '[data-od-id="copy-1"]',
+      label: 'Turn a brand brief into an editorial collage system.',
+      text: 'Turn a brand brief into an editorial collage system.',
+      htmlHint: '<p data-od-id="copy-1">',
+      position: { x: 16, y: 24, width: 320, height: 48 },
+      note: 'Make this copy tighter.',
+      status: 'open',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    render(
+      <CommentSidePanel
+        comments={[comment]}
+        selectedIds={new Set()}
+        activeCommentId={null}
+        collapsed={false}
+        onCollapsedChange={() => {}}
+        onClose={() => {}}
+        onToggleSelect={() => {}}
+        onClearSelection={() => {}}
+        onReply={() => {}}
+        onSendSelected={() => {}}
+        sending={false}
+        t={t}
+      />,
+    );
+
+    expect(screen.getByText('Text')).toBeTruthy();
+    expect(screen.queryByText('Link')).toBeNull();
   });
 });
 

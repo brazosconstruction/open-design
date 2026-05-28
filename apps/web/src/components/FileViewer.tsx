@@ -2011,7 +2011,7 @@ function commentDisplayLabel(comment: PreviewComment, t: TranslateFn): string {
   const source = `${label} ${htmlHint} ${elementId}`;
   if (/\b(?:img|picture|video|canvas|svg)\b/.test(source)) return t('chat.comments.targetImage');
   if (/\b(?:button|input|textarea|select|label)\b/.test(source)) return t('chat.comments.targetControl');
-  if (/\b(?:a)\b/.test(label) || /^<a\b/.test(htmlHint)) return t('chat.comments.targetLink');
+  if (/^<a\b/.test(htmlHint)) return t('chat.comments.targetLink');
   if (/\b(?:h1|h2|h3|h4|h5|h6|p|span|strong|em|small|li|dt|dd)\b/.test(source)) return t('chat.comments.targetText');
   if (/\b(?:section|main|header|footer|nav|article|aside)\b/.test(source)) return t('chat.comments.targetSection');
   if (label.endsWith('.html') || elementId.startsWith('file-comment-')) return t('chat.comments.targetPage');
