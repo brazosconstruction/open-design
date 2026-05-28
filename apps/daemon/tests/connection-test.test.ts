@@ -182,6 +182,43 @@ describe('POST /api/provider/models', () => {
     });
   });
 
+  it('routes provider model discovery through the live proxy dispatcher', async () => {
+    const proxySpy = vi.spyOn(platform, 'resolveSystemProxyEnv').mockReturnValue({
+      HTTP_PROXY: 'http://proxy.example.test:8080',
+      NODE_USE_ENV_PROXY: '1',
+      NO_PROXY: 'localhost,127.0.0.1,[::1]',
+    });
+    const fetchMock = passThroughOrUpstream((_url, init) => {
+      expect(init?.dispatcher).toBeTruthy();
+      return jsonResponse({
+        data: [{ id: 'gpt-4o', object: 'model' }],
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const res = await realFetch(`${baseUrl}/api/provider/models`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          protocol: 'openai',
+          baseUrl: 'https://api.openai.com/v1',
+          apiKey: 'sk-openai',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({
+        ok: true,
+        kind: 'success',
+        models: [{ id: 'gpt-4o', label: 'gpt-4o' }],
+      });
+      expect(proxySpy).toHaveBeenCalledWith();
+    } finally {
+      proxySpy.mockRestore();
+    }
+  });
+
   it('lists Anthropic models with display names and a high page limit', async () => {
     const fetchMock = passThroughOrUpstream((url, init) => {
       expect(url).toBe('https://api.anthropic.com/v1/models?limit=1000');

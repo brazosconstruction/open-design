@@ -270,15 +270,21 @@ export function registerChatRoutes(app: Express, ctx: RegisterChatRoutesDeps) {
       );
     }
     try {
-      const result = await listProviderModels({
-        protocol,
-        baseUrl: body.baseUrl,
-        apiKey: body.apiKey,
-        apiVersion:
-          typeof body.apiVersion === 'string' ? body.apiVersion : undefined,
-        signal: controller.signal,
-      });
-      return res.json(result);
+      const proxyDispatcher = proxyDispatcherRequestInit();
+      try {
+        const result = await listProviderModels({
+          protocol,
+          baseUrl: body.baseUrl,
+          apiKey: body.apiKey,
+          apiVersion:
+            typeof body.apiVersion === 'string' ? body.apiVersion : undefined,
+          signal: controller.signal,
+          requestInit: proxyDispatcher.requestInit,
+        });
+        return res.json(result);
+      } finally {
+        await proxyDispatcher.close();
+      }
     } catch (err: any) {
       console.warn(
         `[provider:models] uncaught: ${err instanceof Error ? err.message : String(err)}`,

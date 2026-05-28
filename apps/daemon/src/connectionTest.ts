@@ -235,6 +235,7 @@ export function mergeNoProxyWithLoopbackDefaults(noProxy: string | undefined): s
 
 function buildConnectionTestProxyDispatcher(
   env: NodeJS.ProcessEnv = process.env,
+  options: ConstructorParameters<typeof EnvHttpProxyAgent>[0] = {},
 ): EnvHttpProxyAgent | null {
   const proxyEnv = mergeProxyAwareEnv(
     process.platform,
@@ -248,6 +249,7 @@ function buildConnectionTestProxyDispatcher(
   const noProxy = mergeNoProxyWithLoopbackDefaults(proxyEnv.NO_PROXY ?? proxyEnv.no_proxy);
   if (!httpProxy && !httpsProxy) return null;
   return new EnvHttpProxyAgent({
+    ...options,
     ...(httpProxy ? { httpProxy } : {}),
     ...(httpsProxy ? { httpsProxy } : {}),
     ...(noProxy ? { noProxy } : {}),
@@ -267,11 +269,12 @@ function isHttpOrHttpsProxy(proxyUrl: string | undefined): string | undefined {
 
 export function proxyDispatcherRequestInit(
   env: NodeJS.ProcessEnv = process.env,
+  options: ConstructorParameters<typeof EnvHttpProxyAgent>[0] = {},
 ): {
   close(): Promise<void>;
   requestInit: Pick<RequestInit, 'dispatcher'>;
 } {
-  const dispatcher = buildConnectionTestProxyDispatcher(env);
+  const dispatcher = buildConnectionTestProxyDispatcher(env, options);
   if (dispatcher == null) {
     return {
       async close() {},

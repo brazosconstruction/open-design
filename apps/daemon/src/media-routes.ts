@@ -2,6 +2,8 @@ import type { Express } from 'express';
 import type { RouteDeps } from './server-context.js';
 import { proxyDispatcherRequestInit } from './connectionTest.js';
 
+const LONG_MEDIA_PROXY_TIMEOUT_MS = 10 * 60 * 1000;
+
 export interface RegisterMediaRoutesDeps extends RouteDeps<'db' | 'http' | 'paths' | 'ids' | 'media' | 'appConfig' | 'orbit' | 'nativeDialogs' | 'projectStore' | 'projectFiles' | 'conversations' | 'research'> {}
 
 export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) {
@@ -166,7 +168,10 @@ export function registerMediaRoutes(app: Express, ctx: RegisterMediaRoutesDeps) 
           `compositionDir=${req.body?.compositionDir ? 'yes' : 'no'}`,
       );
 
-      const proxyDispatcher = proxyDispatcherRequestInit();
+      const proxyDispatcher = proxyDispatcherRequestInit(process.env, {
+        headersTimeout: LONG_MEDIA_PROXY_TIMEOUT_MS,
+        bodyTimeout: LONG_MEDIA_PROXY_TIMEOUT_MS,
+      });
       task.status = 'running';
       persistMediaTask(task);
       generateMedia({
