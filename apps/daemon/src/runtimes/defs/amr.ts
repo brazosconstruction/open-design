@@ -146,6 +146,7 @@ export const amrAgentDef = {
   fallbackModels: [] as RuntimeModelOption[],
   buildArgs: () => ['agent', 'run', '--runtime', 'opencode'],
   streamFormat: 'acp-json-rpc',
+  supportsImagePaths: true,
   // Daemon-process env override for emergency operator pinning. Normal UI
   // selection comes from the live `vela models` catalog and is preflighted
   // before spawn.
