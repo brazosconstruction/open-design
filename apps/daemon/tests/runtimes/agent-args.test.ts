@@ -451,40 +451,20 @@ test('qwen args check promptViaStdin, base args, model args and exclude `-` sent
 });
 
 // `agy` v1.0.3 takes the prompt as the value of `-p` (the flag is named
-// `--print` / `--prompt`, accepts a string, and rejects with `flag needs
-// an argument: -p` when omitted). There is no `--model` flag yet
-// (upstream issue #35), no stdin sentinel, and no JSON output mode
-// (issue #119) — the daemon ships antigravity as a `plain` runtime
-// until those land. Pin the argv shape so a future upstream redesign
-// (e.g. renaming `-p` back to a boolean, adding `--model`) surfaces
-// here and forces an explicit re-review of the integration.
-test('antigravity args put the prompt on argv as the value of -p', () => {
+test('antigravity pipes prompt via stdin with -p - sentinel', () => {
   assert.equal(antigravity.bin, 'agy');
   assert.equal(antigravity.streamFormat, 'plain');
-  assert.equal(antigravity.promptViaStdin, undefined);
+  assert.equal(antigravity.promptViaStdin, true);
 
   const args = antigravity.buildArgs('write hello world', [], [], {});
-  assert.deepEqual(args, ['-p', 'write hello world']);
+  assert.deepEqual(args, ['-p', '-']);
 
-  // No model flag — picking a model in the UI must not silently inject
-  // an unsupported `--model` arg that would fail with `flag provided
-  // but not defined`. Revisit when upstream ships issue #35.
   const withModel = antigravity.buildArgs('hi', [], [], { model: 'gemini-3-pro' });
   assert.equal(withModel.includes('--model'), false);
-  assert.deepEqual(withModel, ['-p', 'hi']);
+  assert.deepEqual(withModel, ['-p', '-']);
 
-  // Prompt rides on argv (no `-` stdin sentinel), so a maxPromptArgBytes
-  // budget must exist so the spawn pipeline can fail fast on oversized
-  // composed prompts before hitting CreateProcess/E2BIG.
-  assert.ok(
-    typeof antigravity.maxPromptArgBytes === 'number'
-      && antigravity.maxPromptArgBytes > 0
-      && antigravity.maxPromptArgBytes < 32_768,
-    `antigravity must declare maxPromptArgBytes under Windows' ~32 KB CreateProcess limit; got ${antigravity.maxPromptArgBytes}`,
-  );
+  assert.equal(antigravity.maxPromptArgBytes, undefined);
 
-  // Model picker must surface as "no real choice" until upstream wires
-  // `--model`. Only the synthetic default option ships.
   assert.deepEqual(
     antigravity.fallbackModels.map((m) => m.id),
     ['default'],

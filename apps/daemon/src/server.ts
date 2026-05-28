@@ -2263,15 +2263,15 @@ function formAnswerTransitionForCurrentPrompt(currentPrompt) {
     '## Latest user turn - form answers submitted',
     trimmed,
     '',
-    `The user has answered the ${formId} form. Do not emit another ${formId} form.`,
+    `The user has answered the ${formId} form. Do NOT emit another <question-form> of any kind. The brief is locked.`,
   ];
-  if (formId.toLowerCase() === 'discovery') {
+  if (formId.toLowerCase() === 'discovery' || formId.toLowerCase() === 'task-type') {
     lines.push(
-      'Continue with RULE 2 / RULE 3 now. For Branch B answers, build now instead of asking another brief.',
+      'Continue with RULE 2 / RULE 3 now. For Branch B answers, build now instead of asking another brief. SKIP RULE 1 entirely — the form has already been answered.',
     );
   } else {
     lines.push(
-      'Treat these form answers as the active user turn instead of replaying the transcript as a fresh request.',
+      'Treat these form answers as the active user turn instead of replaying the transcript as a fresh request. Do NOT re-ask for information already provided.',
     );
   }
   return lines.join('\n');
@@ -10564,14 +10564,22 @@ export async function startServer({
     // instructions and request) — see server.ts:9920 composer notes.
     const ECHO_GUARD =
       '\n\n(Do not quote, restate, or echo the # Instructions block above in your reply. Begin your response with the answer to the # User request below.)';
+    const formAlreadyAnswered = FORM_ANSWERS_HEADER_RE.test(
+      typeof currentPrompt === 'string' ? currentPrompt : '',
+    );
+    const formOverride = formAlreadyAnswered
+      ? '## OVERRIDE — form already answered\nThe user has already submitted their form answers (see # User request below). Do NOT emit any `<question-form>` tag. RULE 1 does NOT apply — the discovery/task-type form is done. Proceed to RULE 2 / RULE 3 and build the artifact.\n\n'
+      : '';
     const composed = [
       instructionPrompt
-        ? `# Instructions (read first)\n\n${instructionPrompt}${cwdHint}${linkedDirsHint}${ECHO_GUARD}\n\n---\n`
+        ? `# Instructions (read first)\n\n${formOverride}${instructionPrompt}${cwdHint}${linkedDirsHint}${ECHO_GUARD}\n\n---\n`
         : cwdHint
-          ? `# Instructions${cwdHint}${linkedDirsHint}${ECHO_GUARD}\n\n---\n`
+          ? `# Instructions\n\n${formOverride}${cwdHint}${linkedDirsHint}${ECHO_GUARD}\n\n---\n`
           : linkedDirsHint
-            ? `# Instructions${linkedDirsHint}${ECHO_GUARD}\n\n---\n`
-            : '',
+            ? `# Instructions\n\n${formOverride}${linkedDirsHint}${ECHO_GUARD}\n\n---\n`
+            : formOverride
+              ? `# Instructions\n\n${formOverride}${ECHO_GUARD}\n\n---\n`
+              : '',
       `# User request\n\n${userRequestPrompt}${attachmentHint}${commentHint}`,
       safeImages.length
         ? `\n\n${safeImages.map((p) => `@${p}`).join(' ')}`
@@ -11538,15 +11546,9 @@ export async function startServer({
           return design.runs.finish(run, 'failed', code ?? 1, signal ?? null);
         }
       }
-      // Empty-output guard: a clean `code === 0` exit on a stream we are
-      // tracking, with no error frame and no substantive event, means the
-      // run silently finished without producing anything visible. That used
-      // to be marked `succeeded` and rendered as an empty assistant turn —
-      // see issue #691, where OpenCode runs were ending in ~3s with no
-      // chat content and no error banner. Surface an explicit failure
-      // instead so the chat shows a clear reason. ACP sessions and plain
-      // stdout streams are gated out via `trackingSubstantiveOutput`;
-      // their success/failure determination lives elsewhere.
+      // Empty-output guard: a clean `code === 0` exit with no visible
+      // output means the run silently finished without producing anything.
+      // Surface an explicit failure so the chat shows a clear reason.
       if (
         code === 0 &&
         !run.cancelRequested &&
@@ -11559,6 +11561,29 @@ export async function startServer({
           { retryable: true },
         ));
         return design.runs.finish(run, 'failed', code, signal);
+      }
+      // Plain-stream empty-output guard: plain agents send raw stdout
+      // chunks without structured event tracking. Detect auth failures
+      // or silent empty responses when exit 0 but no stdout was seen.
+      if (
+        code === 0 &&
+        !run.cancelRequested &&
+        !trackingSubstantiveOutput &&
+        !childStdoutSeen
+      ) {
+        const authFailure = classifyAgentAuthFailure(
+          agentId,
+          `${agentStderrTail}\n${agentStdoutTail}`,
+        );
+        const msg = authFailure
+          ? authFailure.message ?? `${def.name} authentication expired. Please re-authenticate and retry.`
+          : `${def.name} returned an empty response. This may indicate an expired session — try re-authenticating the agent.`;
+        send('error', createSseErrorPayload(
+          authFailure ? 'AGENT_AUTH_REQUIRED' : 'AGENT_EXECUTION_FAILED',
+          msg,
+          { retryable: true },
+        ));
+        return design.runs.finish(run, 'failed', 0, signal);
       }
       // ACP agents that don't shut down on stdin.end() (e.g. Devin for
       // Terminal) are forced to exit via SIGTERM from attachAcpSession after
