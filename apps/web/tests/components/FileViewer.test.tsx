@@ -1722,7 +1722,7 @@ describe('FileViewer tweaks toolbar', () => {
     expect((screen.getByTestId('artifact-preview-frame') as HTMLIFrameElement).srcdoc).toBe(frame.srcdoc);
   });
 
-  it('lets Draw direct send emit a queued annotation while a task is running', async () => {
+  it('disables Draw direct send during a run but keeps Queue available so the annotation is not lost', async () => {
     const annotationSpy = vi.fn();
     window.addEventListener(ANNOTATION_EVENT, annotationSpy);
 
@@ -1738,17 +1738,22 @@ describe('FileViewer tweaks toolbar', () => {
       target: { value: 'mark this' },
     });
 
+    // While a task is running the primary Send is disabled; Queue stays available
+    // so the annotation is staged for the next turn rather than sent mid-run.
+    const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
     const queue = screen.getByRole('button', { name: 'Queue' }) as HTMLButtonElement;
     expect(queue.disabled).toBe(false);
-    const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement;
-    expect(send.disabled).toBe(false);
 
     fireEvent.click(send);
+    expect(annotationSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(queue);
 
     await waitFor(() => expect(annotationSpy).toHaveBeenCalledTimes(1));
     expect(annotationSpy.mock.calls[0]?.[0]).toMatchObject({
       detail: {
-        action: 'send',
+        action: 'queue',
         note: 'mark this',
         filePath: 'preview.html',
       },
