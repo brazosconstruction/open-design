@@ -194,6 +194,16 @@ interface Props {
   daemonMediaProvidersFetchState?: 'idle' | 'ok' | 'error';
   mediaProvidersNotice?: string | null;
   onReloadMediaProviders?: () => Promise<AppConfig['mediaProviders'] | null>;
+  /**
+   * Notified by Settings → Skills after a successful skill registry
+   * mutation (create / edit / delete). App.tsx uses this to drop preview
+   * iframes whose project depends on the affected skill — body-only
+   * edits do not move SkillSummary fields, so ProjectView's signature
+   * path can miss them.
+   */
+  onSkillsChanged?: (affectedSkillId?: string) => void;
+  /** Same channel for design-system registry mutations. */
+  onDesignSystemsChanged?: (affectedDesignSystemId?: string) => void;
 }
 
 export interface AgentRefreshOptions {
@@ -823,6 +833,8 @@ export function SettingsDialog({
   daemonMediaProvidersFetchState = 'idle',
   mediaProvidersNotice,
   onReloadMediaProviders,
+  onSkillsChanged,
+  onDesignSystemsChanged,
 }: Props) {
   const { t, locale, setLocale } = useI18n();
   const analytics = useAnalytics();
@@ -3616,11 +3628,16 @@ export function SettingsDialog({
               cfg={cfg}
               setCfg={setCfg}
               onSkillsRefresh={onSkillsRefresh}
+              onSkillsChanged={onSkillsChanged}
             />
           ) : null}
 
           {activeSection === 'designSystems' ? (
-            <DesignSystemsSection cfg={cfg} setCfg={setCfg} />
+            <DesignSystemsSection
+              cfg={cfg}
+              setCfg={setCfg}
+              onDesignSystemsChanged={onDesignSystemsChanged}
+            />
           ) : null}
 
           {activeSection === 'instructions' ? (
