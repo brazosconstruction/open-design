@@ -349,15 +349,84 @@ export async function saveMessage(
 
 // ---------- tabs ----------
 
+const PROJECT_TABS_CACHE_PREFIX = 'open-design:project-tabs:v1:';
+
+function tabsCacheKey(projectId: string): string {
+  return `${PROJECT_TABS_CACHE_PREFIX}${projectId}`;
+}
+
+function normalizeTabsState(value: unknown): OpenTabsState | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.tabs) || !record.tabs.every((tab) => typeof tab === 'string')) {
+    return null;
+  }
+  const browserTabs = Array.isArray(record.browserTabs)
+    ? record.browserTabs.filter(
+        (tab) =>
+          Boolean(tab) &&
+          typeof tab === 'object' &&
+          !Array.isArray(tab) &&
+          typeof (tab as Record<string, unknown>).id === 'string' &&
+          typeof (tab as Record<string, unknown>).label === 'string',
+      ) as OpenTabsState['browserTabs']
+    : undefined;
+  const state: OpenTabsState = {
+    tabs: record.tabs.slice(),
+    active: typeof record.active === 'string' ? record.active : null,
+  };
+  if (browserTabs && browserTabs.length > 0) state.browserTabs = browserTabs;
+  if (record.hasSavedState === true) state.hasSavedState = true;
+  if (typeof record.updatedAt === 'number' && Number.isFinite(record.updatedAt)) {
+    state.updatedAt = record.updatedAt;
+  }
+  return state;
+}
+
+function readCachedTabs(projectId: string): OpenTabsState | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return normalizeTabsState(JSON.parse(window.localStorage.getItem(tabsCacheKey(projectId)) ?? 'null'));
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedTabs(projectId: string, state: OpenTabsState): OpenTabsState {
+  const next: OpenTabsState = {
+    ...state,
+    updatedAt: Date.now(),
+  };
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(tabsCacheKey(projectId), JSON.stringify(next));
+    } catch {
+      // Ignore quota/private-mode failures. The daemon save below is canonical.
+    }
+  }
+  return next;
+}
+
+function newestTabsState(
+  first: OpenTabsState | null,
+  second: OpenTabsState | null,
+): OpenTabsState {
+  if (!first && !second) return { tabs: [], active: null };
+  if (!first) return second!;
+  if (!second) return first;
+  return (second.updatedAt ?? 0) > (first.updatedAt ?? 0) ? second : first;
+}
+
 export async function loadTabs(projectId: string): Promise<OpenTabsState> {
+  const cached = readCachedTabs(projectId);
   try {
     const resp = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/tabs`,
     );
-    if (!resp.ok) return { tabs: [], active: null };
-    return (await resp.json()) as OpenTabsState;
+    if (!resp.ok) return cached ?? { tabs: [], active: null };
+    return newestTabsState(cached, normalizeTabsState(await resp.json()));
   } catch {
-    return { tabs: [], active: null };
+    return cached ?? { tabs: [], active: null };
   }
 }
 
@@ -365,11 +434,13 @@ export async function saveTabs(
   projectId: string,
   state: OpenTabsState,
 ): Promise<void> {
+  const next = writeCachedTabs(projectId, state);
   try {
     await fetch(`/api/projects/${encodeURIComponent(projectId)}/tabs`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(state),
+      body: JSON.stringify(next),
+      keepalive: true,
     });
   } catch {
     // best-effort

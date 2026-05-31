@@ -1642,13 +1642,14 @@ export function listTabs(db: SqliteDb, projectId: string) {
     )
     .all(projectId) as DbRow[];
   const state = db
-    .prepare(`SELECT project_id, state_json AS stateJson FROM tabs_state WHERE project_id = ? LIMIT 1`)
+    .prepare(`SELECT project_id, updated_at AS updatedAt, state_json AS stateJson FROM tabs_state WHERE project_id = ? LIMIT 1`)
     .get(projectId) as DbRow | undefined;
   const savedState = parseProjectTabsStateJson(state?.stateJson);
   if (savedState) {
     return {
       ...savedState,
       hasSavedState: true,
+      updatedAt: Number(state?.updatedAt ?? Date.now()),
     };
   }
   const active = (rows as DbRow[]).find((r: DbRow) => r.isActive) ?? null;
@@ -1656,6 +1657,7 @@ export function listTabs(db: SqliteDb, projectId: string) {
     tabs: (rows as DbRow[]).map((r: DbRow) => r.name),
     active: active ? active.name : null,
     hasSavedState: rows.length > 0 || Boolean(state),
+    updatedAt: state ? Number(state.updatedAt ?? Date.now()) : undefined,
   };
 }
 
