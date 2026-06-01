@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ApplyResult,
+  ChatSessionMode,
   ConnectorDetail,
   InputFieldSpec,
   McpServerConfig,
@@ -231,6 +232,7 @@ export function HomeView({
   const [fallbackProjectMetadata, setFallbackProjectMetadata] =
     useState<ProjectMetadata | null>(null);
   const [active, setActive] = useState<ActivePlugin | null>(null);
+  const [sessionMode, setSessionMode] = useState<ChatSessionMode>('design');
   const [activeSkill, setActiveSkill] = useState<SkillSummary | null>(null);
   const [selectedPluginContexts, setSelectedPluginContexts] = useState<SelectedPluginContext[]>([]);
   const [selectedMcpContexts, setSelectedMcpContexts] = useState<SelectedMcpContext[]>([]);
@@ -1256,9 +1258,13 @@ export function HomeView({
     // Scenario plugins (chips / preset cards) and explicit skill picks are
     // mutually exclusive routing sources — never send both (#2972).
     const resolvedSkillId = submittedActive ? null : activeSkill?.id ?? null;
+    const routedPluginId =
+      sessionMode === 'design'
+        ? submittedActive?.record.id ?? DEFAULT_UNSELECTED_SCENARIO_PLUGIN_ID
+        : submittedActive?.record.id ?? null;
     onSubmit({
       prompt: trimmed,
-      pluginId: submittedActive?.record.id ?? DEFAULT_UNSELECTED_SCENARIO_PLUGIN_ID,
+      pluginId: routedPluginId,
       skillId: resolvedSkillId,
       appliedPluginSnapshotId: submittedActive?.result?.appliedPlugin?.snapshotId ?? null,
       pluginTitle: submittedActive?.record.title ?? null,
@@ -1271,6 +1277,7 @@ export function HomeView({
       contextMcpServers,
       contextConnectors,
       attachments: stagedFiles,
+      conversationMode: sessionMode,
     });
   }
 
@@ -1281,6 +1288,8 @@ export function HomeView({
         prompt={prompt}
         onPromptChange={handlePromptChange}
         onSubmit={submit}
+        sessionMode={sessionMode}
+        onSessionModeChange={setSessionMode}
         activePluginTitle={activeBadgeTitle}
         activePluginRecord={active?.record ?? null}
         activeSkillId={activeSkill?.id ?? null}

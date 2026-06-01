@@ -107,7 +107,7 @@ import {
   type SaveMessageOptions,
   waitGeneratedPluginShareTask,
 } from '../state/projects';
-import type { AppliedPluginSnapshot } from '@open-design/contracts';
+import type { AppliedPluginSnapshot, ChatSessionMode } from '@open-design/contracts';
 import type {
   AgentEvent,
   AgentInfo,
@@ -180,6 +180,7 @@ import {
 type ProjectChatSendMeta = ChatSendMeta & {
   queueOnly?: boolean;
   retryOfAssistantId?: string;
+  sessionMode?: ChatSessionMode;
 };
 
 interface Props {
@@ -567,6 +568,11 @@ export function ProjectView({
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
     null,
   );
+  const activeConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === activeConversationId) ?? null,
+    [conversations, activeConversationId],
+  );
+  const activeSessionMode = activeConversation?.sessionMode ?? 'design';
   const [messagesConversationId, setMessagesConversationId] = useState<string | null>(null);
   const [failedMessagesConversationId, setFailedMessagesConversationId] = useState<string | null>(null);
   const [conversationLoadError, setConversationLoadError] = useState<string | null>(null);
@@ -1456,7 +1462,9 @@ export function ProjectView({
     return project.id;
   }, [project.id]);
 
-  const composedSystemPrompt = useCallback(async (): Promise<string> => {
+  const composedSystemPrompt = useCallback(async (
+    sessionModeOverride: ChatSessionMode = activeSessionMode,
+  ): Promise<string> => {
     let skillBody: string | undefined;
     let skillName: string | undefined;
     let skillMode: SkillSummary['mode'] | undefined;
@@ -1559,6 +1567,7 @@ export function ProjectView({
       audioVoiceOptions,
       audioVoiceOptionsError: audioVoiceOptionsLookupError,
       streamFormat: config.mode === 'api' ? 'plain' : undefined,
+      sessionMode: sessionModeOverride,
       locale,
       userInstructions: config.customInstructions,
       projectInstructions: project.customInstructions,
@@ -1573,6 +1582,7 @@ export function ProjectView({
     designSystems,
     config.mode,
     config.customInstructions,
+    activeSessionMode,
     locale,
   ]);
 
@@ -2326,6 +2336,7 @@ export function ProjectView({
     ) => {
       if (!activeConversationId) return;
       if (messagesConversationIdRef.current !== activeConversationId) return;
+      const runSessionMode = meta?.sessionMode ?? activeSessionMode;
       const retryTarget = meta?.retryOfAssistantId
         ? resolveRetryTarget(messages, meta.retryOfAssistantId)
         : null;
@@ -2343,7 +2354,7 @@ export function ProjectView({
           prompt,
           attachments,
           commentAttachments,
-          meta,
+          meta: { ...(meta ?? {}), sessionMode: runSessionMode },
         });
         return;
       }
@@ -2353,7 +2364,7 @@ export function ProjectView({
           prompt,
           attachments,
           commentAttachments,
-          meta,
+          meta: { ...(meta ?? {}), sessionMode: runSessionMode },
         });
         return;
       }
@@ -2831,6 +2842,7 @@ export function ProjectView({
           designSystemId: project.designSystemId ?? null,
           attachments: runAttachments.map((a) => a.path),
           commentAttachments: runCommentAttachments,
+          sessionMode: runSessionMode,
           research: meta?.research,
           mediaExecution: mediaExecutionPolicyForProjectMetadata(project.metadata),
           model: choice?.model ?? null,
@@ -2924,7 +2936,7 @@ export function ProjectView({
             // on the next event.
           }
         }
-        const systemPrompt = await composedSystemPrompt();
+        const systemPrompt = await composedSystemPrompt(runSessionMode);
         const apiHistory = await historyWithApiAttachmentContext(
           historyWithCommentAttachmentContext(nextHistory, userMsg.id),
           userMsg.id,
@@ -2972,6 +2984,7 @@ export function ProjectView({
     [
       attachedComments,
       activeConversationId,
+      activeSessionMode,
       currentConversationBusy,
       queueChatSendForCurrentConversation,
       messages,
@@ -3701,6 +3714,53 @@ export function ProjectView({
     [project.id],
   );
 
+  const handleConversationSessionModeChange = useCallback(
+    async (id: string, sessionMode: ChatSessionMode) => {
+      setConversations((curr) =>
+        curr.map((conversation) =>
+          conversation.id === id ? { ...conversation, sessionMode } : conversation,
+        ),
+      );
+      const updated = await patchConversation(project.id, id, { sessionMode });
+      if (updated) {
+        setConversations((curr) =>
+          curr.map((conversation) =>
+            conversation.id === id ? { ...conversation, ...updated } : conversation,
+          ),
+        );
+      }
+    },
+    [project.id],
+  );
+
+  const handleActiveConversationSessionModeChange = useCallback(
+    (sessionMode: ChatSessionMode) => {
+      if (!activeConversationId) return;
+      void handleConversationSessionModeChange(activeConversationId, sessionMode);
+    },
+    [activeConversationId, handleConversationSessionModeChange],
+  );
+
+  // Side Chat launcher: create a NEW conversation seeded with the current
+  // chat's context (the daemon copies the source conversation's messages) and
+  // resolve its id. The new conversation is a normal conversation, so it shows
+  // up in the header ConversationsMenu the moment we prepend it here. The
+  // FileWorkspace launcher action then opens it as a `chat:<id>` tab.
+  const handleCreateSideChat = useCallback(
+    async (seedFromConversationId: string | null): Promise<string | null> => {
+      const fresh = await createConversation(
+        project.id,
+        t('workspace.sideChatDefaultTitle'),
+        { seedFromConversationId },
+      );
+      if (!fresh) return null;
+      setConversations((curr) => [fresh, ...curr]);
+      onProjectsRefresh();
+      return fresh.id;
+    },
+    [project.id, t, onProjectsRefresh],
+  );
+
   const handleProjectRename = useCallback(
     (newName: string) => {
       const trimmed = newName.trim();
@@ -3721,6 +3781,49 @@ export function ProjectView({
       });
     },
     [project, onProjectChange],
+  );
+
+  const activeConversationChatState = useMemo(
+    () =>
+      activeConversationId
+        ? {
+            conversationId: activeConversationId,
+            messages,
+            streaming: currentConversationStreaming,
+            sendDisabled: currentConversationSendDisabled,
+            queuedItems: currentConversationQueuedItems,
+            error: conversationLoadError ?? error ?? audioVoiceOptionsError,
+            onSend: handleSend,
+            onRetry: handleRetry,
+            onStop: handleStop,
+            onSubmitForm: (text: string) => {
+              if (currentConversationActionDisabled) return;
+              void handleSend(text, [], []);
+            },
+            onRemoveQueuedSend: removeQueuedChatSend,
+            onUpdateQueuedSend: updateQueuedChatSend,
+            onSendQueuedNow: sendQueuedChatSendNow,
+            onAssistantFeedback: handleAssistantFeedback,
+          }
+        : undefined,
+    [
+      activeConversationId,
+      audioVoiceOptionsError,
+      conversationLoadError,
+      currentConversationActionDisabled,
+      currentConversationQueuedItems,
+      currentConversationSendDisabled,
+      currentConversationStreaming,
+      error,
+      handleAssistantFeedback,
+      handleRetry,
+      handleSend,
+      handleStop,
+      messages,
+      removeQueuedChatSend,
+      sendQueuedChatSendNow,
+      updateQueuedChatSend,
+    ],
   );
 
   const handleChangeDesignSystemId = useCallback(
@@ -4577,6 +4680,8 @@ export function ProjectView({
               queuedItems={currentConversationQueuedItems}
               error={conversationLoadError ?? error ?? audioVoiceOptionsError}
               projectId={project.id}
+              sessionMode={activeSessionMode}
+              onSessionModeChange={handleActiveConversationSessionModeChange}
               projectKindForTracking={projectKindToTracking(project.metadata?.kind)}
               projectFiles={projectFiles}
               hasActiveDesignSystem={!!project.designSystemId}
@@ -4704,6 +4809,18 @@ export function ProjectView({
           githubConnected={githubConnected}
           commentPortalId={commentInspectorPortalId}
           onCommentModeChange={setCommentInspectorActive}
+          chatConfig={config}
+          chatAgentsById={agentsById}
+          chatLocale={locale}
+          conversations={conversations}
+          activeConversationId={activeConversationId}
+          onSelectConversation={handleSelectConversation}
+          onDeleteConversation={handleDeleteConversation}
+          onRenameConversation={handleRenameConversation}
+          onConversationSessionModeChange={handleConversationSessionModeChange}
+          onNewConversation={handleNewConversation}
+          activeConversationChat={activeConversationChatState}
+          onCreateSideChat={handleCreateSideChat}
         />
       </div>
       {projectActionsToast ? (

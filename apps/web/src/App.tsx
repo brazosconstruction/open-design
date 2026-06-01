@@ -12,6 +12,7 @@ import {
   projectKindToTracking,
   fidelityToTracking,
 } from '@open-design/contracts/analytics';
+import type { ChatSessionMode } from '@open-design/contracts';
 import { EntryView } from './components/EntryView';
 import type { IntegrationTab } from './components/IntegrationsView';
 import { MarketplaceView } from './components/MarketplaceView';
@@ -829,6 +830,7 @@ function AppInner() {
         pluginId?: string;
         appliedPluginSnapshotId?: string;
         pluginInputs?: Record<string, unknown>;
+        conversationMode?: ChatSessionMode;
         autoSendFirstMessage?: boolean;
         requestId?: string;
         pendingFiles?: File[];
@@ -852,6 +854,7 @@ function AppInner() {
         designSystemId: input.designSystemId,
         pendingPrompt: derivedPendingPrompt,
         metadata: input.metadata,
+        ...(input.conversationMode ? { conversationMode: input.conversationMode } : {}),
         ...(input.pluginId ? { pluginId: input.pluginId } : {}),
         ...(input.appliedPluginSnapshotId
           ? { appliedPluginSnapshotId: input.appliedPluginSnapshotId }

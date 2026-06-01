@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import {
   defaultScenarioPluginIdForProjectMetadata,
+  type ChatSessionMode,
   type PluginManifest,
 } from '@open-design/contracts';
 import { createProjectArtifactFile } from './artifact-create.js';
@@ -119,6 +120,10 @@ function injectUrlPreviewScrollBridge(html: string): string {
     return `${html.slice(0, bodyCloseIndex)}${URL_PREVIEW_SCROLL_BRIDGE}${html.slice(bodyCloseIndex)}`;
   }
   return `${html}${URL_PREVIEW_SCROLL_BRIDGE}`;
+}
+
+function normalizeChatSessionMode(value: unknown): ChatSessionMode {
+  return value === 'chat' ? 'chat' : 'design';
 }
 
 export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDeps) {
@@ -318,10 +323,14 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
       });
       // Seed a default conversation so the UI always has somewhere to write.
       const cid = randomId();
+      const initialSessionMode = normalizeChatSessionMode(
+        req.body?.conversationMode ?? req.body?.sessionMode,
+      );
       insertConversation(db, {
         id: cid,
         projectId: id,
         title: null,
+        sessionMode: initialSessionMode,
         createdAt: now,
         updatedAt: now,
       });
@@ -333,7 +342,7 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
             && req.body.appliedPluginSnapshotId.trim().length > 0;
       let resolveBody =
         explicitPlugin ? (req.body as Record<string, unknown>) : null;
-      if (!resolveBody) {
+      if (!resolveBody && initialSessionMode === 'design') {
         const fallbackPluginId = defaultScenarioPluginIdForProjectMetadata(projectMetadata);
         if (fallbackPluginId && getInstalledPlugin(db, fallbackPluginId)) {
           resolveBody = { ...(req.body || {}), pluginId: fallbackPluginId };
@@ -597,15 +606,51 @@ export function registerProjectRoutes(app: Express, ctx: RegisterProjectRoutesDe
     if (!getProject(db, req.params.id)) {
       return res.status(404).json({ error: 'project not found' });
     }
-    const { title } = req.body || {};
+    const { title, seedFromConversationId } = req.body || {};
     const now = Date.now();
+    const hasExplicitSessionMode = Boolean(
+      req.body && Object.prototype.hasOwnProperty.call(req.body, 'sessionMode'),
+    );
+    const sourceConversation =
+      typeof seedFromConversationId === 'string' && seedFromConversationId
+        ? getConversation(db, seedFromConversationId)
+        : null;
+    const sessionMode =
+      hasExplicitSessionMode
+        ? normalizeChatSessionMode(req.body.sessionMode)
+        : sourceConversation && sourceConversation.projectId === req.params.id
+          ? normalizeChatSessionMode(sourceConversation.sessionMode)
+          : 'design';
     const conv = insertConversation(db, {
       id: randomId(),
       projectId: req.params.id,
       title: typeof title === 'string' ? title.trim() || null : null,
+      sessionMode,
       createdAt: now,
       updatedAt: now,
     });
+    // Side Chat: inherit the source conversation's context by copying its
+    // messages into the fresh conversation. Be defensive — a missing or
+    // cross-project source id silently yields an empty conversation.
+    if (conv && typeof seedFromConversationId === 'string' && seedFromConversationId) {
+      const source = sourceConversation;
+      if (source && source.projectId === req.params.id) {
+        for (const m of listMessages(db, seedFromConversationId)) {
+          // Fresh id per copied message; upsertMessage assigns the next
+          // position so role/content ordering is preserved. Drop the source's
+          // run pointers (runId/runStatus/lastRunEventId): they belong to the
+          // OTHER conversation's runs, and a copied still-`running` assistant
+          // turn would otherwise render a perpetual spinner in the side chat.
+          upsertMessage(db, conv.id, {
+            ...m,
+            id: randomId(),
+            runId: undefined,
+            runStatus: undefined,
+            lastRunEventId: undefined,
+          });
+        }
+      }
+    }
     res.json({ conversation: conv });
   });
 

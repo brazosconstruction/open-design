@@ -409,6 +409,48 @@ function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([arr], { type: mime });
 }
 
+type ClipboardItemCtor = new (
+  items: Record<string, Blob | Promise<Blob>>,
+) => ClipboardItem;
+
+/**
+ * Copy a PNG (or other image) data-URL onto the system clipboard as a real
+ * image item, so it can be pasted into the chat composer or any other app.
+ * Returns 'copied' on success, 'denied' when the clipboard API is missing or
+ * the browser refuses the write for permission/security reasons, and 'failed'
+ * for any other error (e.g. a malformed data-URL).
+ */
+export async function copyImageDataUrlToClipboard(
+  dataUrl: string,
+): Promise<'copied' | 'denied' | 'failed'> {
+  const clipboard = navigator.clipboard;
+  const ClipboardItemRef = (globalThis as { ClipboardItem?: ClipboardItemCtor })
+    .ClipboardItem;
+  if (!clipboard || typeof clipboard.write !== 'function' || !ClipboardItemRef) {
+    return 'denied';
+  }
+  try {
+    const blob = dataUrlToBlob(dataUrl);
+    // Safari only honours clipboard.write() inside the original user gesture,
+    // so prefer the Promise<Blob> ClipboardItem form when supported — it lets
+    // the browser resolve the blob lazily without losing the gesture context.
+    let item: ClipboardItem;
+    try {
+      item = new ClipboardItemRef({ [blob.type]: Promise.resolve(blob) });
+    } catch {
+      item = new ClipboardItemRef({ [blob.type]: blob });
+    }
+    await clipboard.write([item]);
+    return 'copied';
+  } catch (err) {
+    const name = (err as { name?: string } | null)?.name;
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      return 'denied';
+    }
+    return 'failed';
+  }
+}
+
 export type ImageExportFormat = 'png' | 'jpeg' | 'webp';
 
 type ImageExportSpec = {

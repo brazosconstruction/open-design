@@ -17,6 +17,7 @@ import type {
   ChatRunStatus,
   ChatRunStatusResponse,
   ChatRequest,
+  ChatSessionMode,
   ChatSseEvent,
   ChatSseStartPayload,
   DaemonAgentPayload,
@@ -204,6 +205,7 @@ export interface DaemonStreamOptions {
   // workspace.
   projectId?: string | null;
   conversationId?: string | null;
+  sessionMode?: ChatSessionMode;
   assistantMessageId?: string | null;
   clientRequestId?: string | null;
   skillId?: string | null;
@@ -300,6 +302,7 @@ export async function streamViaDaemon({
   handlers,
   projectId,
   conversationId,
+  sessionMode,
   assistantMessageId,
   clientRequestId,
   skillId,
@@ -333,6 +336,7 @@ export async function streamViaDaemon({
     currentPrompt: latestUserPromptFromHistory(history),
     projectId: projectId ?? null,
     conversationId: conversationId ?? null,
+    sessionMode,
     assistantMessageId: assistantMessageId ?? null,
     clientRequestId: clientRequestId ?? null,
     skillId: skillId ?? null,

@@ -6,7 +6,7 @@ import type { Dict } from '../i18n/types';
 import { copyToClipboard } from '../lib/copy-to-clipboard';
 import { projectRawUrl } from '../providers/registry';
 import type { TodoItem } from '../runtime/todos';
-import type { AppliedPluginSnapshot } from '@open-design/contracts';
+import type { AppliedPluginSnapshot, ChatSessionMode } from '@open-design/contracts';
 import type { TrackingProjectKind } from '@open-design/contracts/analytics';
 import {
   DESIGN_SYSTEM_WORKSPACE_DISPLAY_DESCRIPTION,
@@ -215,6 +215,8 @@ interface Props {
   streaming: boolean;
   error: string | null;
   projectId: string | null;
+  sessionMode?: ChatSessionMode;
+  onSessionModeChange?: (mode: ChatSessionMode) => void;
   // Analytics-only — forwarded to AssistantMessage so the feedback
   // events know which project surface the rating applies to. Optional
   // (defaults to null/'prototype') so unit tests can mount ChatPane
@@ -355,6 +357,8 @@ export function ChatPane({
   queuedItems = [],
   error,
   projectId,
+  sessionMode = 'design',
+  onSessionModeChange,
   projectKindForTracking = null,
   projectFiles,
   hasActiveDesignSystem = false,
@@ -1315,6 +1319,8 @@ export function ChatPane({
             ref={composerRef}
             projectId={projectId}
             projectFiles={projectFiles}
+            sessionMode={sessionMode}
+            onSessionModeChange={onSessionModeChange}
             skills={skills}
             streaming={streaming}
             sendDisabled={sendDisabled}

@@ -477,7 +477,7 @@ describe('ChatComposer context pickers', () => {
     expect(screen.getByText('Private export workflow')).toBeTruthy();
   });
 
-  it('clears absolute anchors when the pet popover switches to fixed positioning', async () => {
+  it('does not render the pet composer entry when pet handlers are wired', () => {
     renderComposer({
       petConfig: {
         adopted: false,
@@ -495,15 +495,7 @@ describe('ChatComposer context pickers', () => {
       onOpenPetSettings: vi.fn(),
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Pets — wake, tuck, or pick one' }));
-
-    const menu = screen.getByText('Show pet').closest('.composer-pet-menu') as HTMLElement | null;
-    expect(menu).not.toBeNull();
-
-    await waitFor(() => {
-      expect(menu?.style.position).toBe('fixed');
-      expect(menu?.style.bottom).toBe('auto');
-      expect(menu?.style.right).toBe('auto');
-    });
+    expect(screen.queryByRole('button', { name: 'Pets — wake, tuck, or pick one' })).toBeNull();
+    expect(screen.queryByText('Buddy')).toBeNull();
   });
 });

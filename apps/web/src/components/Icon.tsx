@@ -68,6 +68,7 @@ export type IconName =
   | 'sun'
   | 'moon'
   | 'sun-moon'
+  | 'terminal'
   | 'thumbs-down'
   | 'thumbs-up'
   | 'tweaks'
@@ -613,6 +614,16 @@ export function Icon({ name, size = 14, strokeWidth = 1.6, ...rest }: Props) {
           <path d="M20 12h2" />
           <path d="m6.3 17.7-1.4 1.4" />
           <path d="m19.1 4.9-1.4 1.4" />
+        </svg>
+      );
+    case 'terminal':
+      // Lucide-style terminal — a command-prompt chevron plus an underscore
+      // input line, used for the workspace "New Terminal" launcher action and
+      // the terminal:<id> tab icon.
+      return (
+        <svg {...common}>
+          <path d="m7 11 3-3-3-3" />
+          <path d="M13 13h6" />
         </svg>
       );
     case 'thumbs-up':

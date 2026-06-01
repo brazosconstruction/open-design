@@ -6,7 +6,7 @@
  * streaming turns, failed runs, and empty responses.
  */
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AssistantMessage } from '../../src/components/AssistantMessage';
@@ -60,6 +60,48 @@ function producedFile(name: string): ProjectFile {
 }
 
 describe('AssistantMessage feedback gate', () => {
+  it('copies the raw assistant markdown from the completion footer', async () => {
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText,
+      },
+    });
+    try {
+      const message = baseMessage({
+        content: '**Done.**\n\n- Keep the markdown',
+        events: [
+          {
+            kind: 'text',
+            text: '**Done.**\n\n- Keep the markdown',
+          } as ChatMessage['events'][number],
+        ],
+      });
+      render(
+        <AssistantMessage
+          message={message}
+          streaming={false}
+          projectId="proj-1"
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Copy response markdown' }));
+
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith(message.content);
+      });
+      expect(screen.getByRole('button', { name: 'Copied!' })).toBeTruthy();
+    } finally {
+      if (originalClipboard) {
+        Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      } else {
+        delete (navigator as { clipboard?: Clipboard }).clipboard;
+      }
+    }
+  });
+
   it('shows the feedback widget after a successful turn that produced files', () => {
     render(
       <AssistantMessage

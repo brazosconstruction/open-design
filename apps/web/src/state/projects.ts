@@ -8,13 +8,17 @@
 import type {
   AppliedPluginSnapshot,
   ApplyResult,
+  ChatSessionMode,
+  CreateConversationRequest,
   CreatePluginShareProjectResponse,
+  CreateTerminalRequest,
   ImportFolderRequest,
   ImportFolderResponse,
   InstalledPluginRecord,
   PluginInstallOutcome,
   PluginShareAction,
   ProjectPluginFolderInstallRequest,
+  TerminalSession,
 } from '@open-design/contracts';
 import { randomUUID } from '../utils/uuid';
 import type {
@@ -57,6 +61,7 @@ export async function createProject(input: {
   designSystemId: string | null;
   pendingPrompt?: string;
   metadata?: ProjectMetadata;
+  conversationMode?: ChatSessionMode;
   // Plan §3.A1 / spec §11.5 — POST /api/projects accepts a pluginId
   // (or pre-applied snapshot id) to resolve and pin a plugin to the new
   // project. Used by the PluginLoopHome flow on Home.
@@ -241,14 +246,24 @@ export async function listConversations(
 export async function createConversation(
   projectId: string,
   title?: string,
+  // Side Chat: seed the new conversation with another conversation's context
+  // by copying its messages. The daemon ignores a missing/foreign source id.
+  opts?: { seedFromConversationId?: string | null; sessionMode?: ChatSessionMode },
 ): Promise<Conversation | null> {
   try {
+    const body: CreateConversationRequest = { title };
+    if (opts?.sessionMode) {
+      body.sessionMode = opts.sessionMode;
+    }
+    if (opts?.seedFromConversationId) {
+      body.seedFromConversationId = opts.seedFromConversationId;
+    }
     const resp = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/conversations`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify(body),
       },
     );
     if (!resp.ok) return null;
@@ -344,6 +359,103 @@ export async function saveMessage(
     );
   } catch {
     // best-effort persistence — UI keeps the message in-memory either way
+  }
+}
+
+// ---------- terminals ----------
+//
+// Interactive PTY sessions rooted at the project working directory. The daemon
+// streams output down over SSE (`GET .../stream`) and accepts keystrokes /
+// resizes back up over plain POST — see `packages/contracts/src/api/terminals.ts`.
+// `<TerminalViewer>` drives `terminalStreamUrl` directly via EventSource; these
+// helpers cover the request/response endpoints.
+
+export async function createTerminal(
+  projectId: string,
+  init?: CreateTerminalRequest,
+): Promise<TerminalSession | null> {
+  try {
+    const resp = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/terminals`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(init ?? {}),
+      },
+    );
+    if (!resp.ok) return null;
+    const json = (await resp.json()) as { terminal: TerminalSession };
+    return json.terminal ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** SSE endpoint a `<TerminalViewer>` subscribes to for raw PTY output. */
+export function terminalStreamUrl(projectId: string, terminalId: string): string {
+  return `/api/projects/${encodeURIComponent(projectId)}/terminals/${encodeURIComponent(terminalId)}/stream`;
+}
+
+export async function sendTerminalStdin(
+  projectId: string,
+  terminalId: string,
+  data: string,
+): Promise<boolean> {
+  try {
+    const resp = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/terminals/${encodeURIComponent(terminalId)}/stdin`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data }),
+      },
+    );
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function resizeTerminal(
+  projectId: string,
+  terminalId: string,
+  cols: number,
+  rows: number,
+): Promise<boolean> {
+  try {
+    const resp = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/terminals/${encodeURIComponent(terminalId)}/resize`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cols, rows }),
+      },
+    );
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function killTerminal(
+  projectId: string,
+  terminalId: string,
+  // Page-unload paths set keepalive so the kill survives document teardown,
+  // mirroring `saveMessage`. Without it the browser cancels the fetch and the
+  // PTY leaks until the daemon GCs it.
+  options: { keepalive?: boolean } = {},
+): Promise<boolean> {
+  try {
+    const resp = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/terminals/${encodeURIComponent(terminalId)}/kill`,
+      {
+        method: 'POST',
+        ...(options.keepalive ? { keepalive: true } : {}),
+      },
+    );
+    return resp.ok;
+  } catch {
+    return false;
   }
 }
 

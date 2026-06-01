@@ -6,7 +6,6 @@ import {
   useState,
   type DragEvent as ReactDragEvent,
 } from 'react';
-import { createPortal } from 'react-dom';
 import type { TrackingProjectKind } from '@open-design/contracts/analytics';
 import { useAnalytics } from '../analytics/provider';
 import {
@@ -33,8 +32,15 @@ import { deriveFileOps, type FileOpEntry } from '../runtime/file-ops';
 import { latestTodosFromEvents, type TodoItem } from '../runtime/todos';
 import {
   type AgentEvent,
+  type AgentInfo,
+  type AppConfig,
   type ChatAttachment,
   type ChatCommentAttachment,
+  type Conversation,
+  conversationIdFromSideChatTabId,
+  isSideChatTabId,
+  isTerminalTabId,
+  terminalIdFromTabId,
   liveArtifactSummaryToWorkspaceEntry,
   type LiveArtifactSummary,
   type LiveArtifactEventItem,
@@ -48,12 +54,19 @@ import {
   type ProjectFile,
   type ProjectFolder,
 } from '../types';
+import type { ChatSessionMode } from '@open-design/contracts';
+import { createTerminal } from '../state/projects';
 import { DesignFilesPanel } from './DesignFilesPanel';
 import { DesignBrowserPanel, labelFromUrl, type BrowserPageInfo } from './DesignBrowserPanel';
 import type { PluginFolderAgentAction } from './design-files/pluginFolderActions';
 import { designSystemGithubEvidenceState, repoConnectCopy } from './design-system-github-evidence';
 import { FileViewer, LiveArtifactViewer } from './FileViewer';
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
+import { Toast } from './Toast';
+import { TabLauncherMenu } from './workspace/TabLauncherMenu';
+import { buildLauncherActions, type LauncherContext } from './workspace/tab-launcher';
+import { SideChatTab, type ActiveConversationChatState } from './workspace/SideChatTab';
+import { TerminalViewer } from './workspace/TerminalViewer';
 import { LiveArtifactBadges } from './LiveArtifactBadges';
 import { MissingBrandFontsBanner } from './MissingBrandFontsBanner';
 import { PasteTextDialog } from './PasteTextDialog';
@@ -115,6 +128,24 @@ interface Props {
   githubConnected?: boolean;
   commentPortalId?: string;
   onCommentModeChange?: (active: boolean) => void;
+  // Side Chat (`chat:<conversationId>` tab) wiring. Threaded from ProjectView
+  // so a secondary ChatPane can run against a seeded conversation without
+  // FileWorkspace owning any chat state. All optional: a workspace mounted
+  // without these simply offers no "New Side Chat" launcher entry.
+  chatConfig?: AppConfig;
+  chatAgentsById?: Map<string, AgentInfo>;
+  chatLocale?: string;
+  conversations?: Conversation[];
+  /** The primary chat's active conversation — the seed source for new side chats. */
+  activeConversationId?: string | null;
+  onSelectConversation?: (id: string) => void;
+  onDeleteConversation?: (id: string) => void;
+  onRenameConversation?: (id: string, title: string) => void;
+  onConversationSessionModeChange?: (id: string, mode: ChatSessionMode) => void;
+  onNewConversation?: () => void;
+  activeConversationChat?: ActiveConversationChatState;
+  /** Create a context-seeded conversation and resolve its id (backs the launcher). */
+  onCreateSideChat?: (seedFromConversationId: string | null) => Promise<string | null>;
 }
 
 interface SketchState {
@@ -131,7 +162,6 @@ interface SketchState {
 const DESIGN_FILES_TAB = '__design_files__';
 const DESIGN_SYSTEM_TAB = '__design_system__';
 const BROWSER_TAB_PREFIX = '__browser__:';
-const ADD_MENU_WIDTH = 260;
 type TabDropEdge = 'before' | 'after';
 type BrowserWorkspaceTab = ProjectBrowserWorkspaceTab;
 type WorkspaceOrderedTab =
@@ -253,6 +283,18 @@ export function FileWorkspace({
   githubConnected,
   commentPortalId,
   onCommentModeChange,
+  chatConfig,
+  chatAgentsById,
+  chatLocale,
+  conversations = [],
+  activeConversationId = null,
+  onSelectConversation,
+  onDeleteConversation,
+  onRenameConversation,
+  onConversationSessionModeChange,
+  onNewConversation,
+  activeConversationChat,
+  onCreateSideChat,
 }: Props) {
   const t = useT();
   const analytics = useAnalytics();
@@ -270,6 +312,16 @@ export function FileWorkspace({
   // Persisted tabs come from the parent. Active tab can transiently point
   // at a pending sketch — pending sketches are not in tabsState.tabs.
   const persistedTabs = tabsState.tabs;
+  // Launcher "create" actions (New Terminal / Side Chat) resolve
+  // asynchronously; keep the latest committed tab state out of render
+  // closures so opening the new tab appends to the freshest list instead of
+  // replaying a stale closure and dropping tabs added in the meantime.
+  const tabsStateRef = useRef(tabsState);
+  const lastTabsStatePropRef = useRef(tabsState);
+  if (lastTabsStatePropRef.current !== tabsState) {
+    tabsStateRef.current = tabsState;
+    lastTabsStatePropRef.current = tabsState;
+  }
   const [activeTab, setActiveTab] = useState<string>(
     tabsState.active ?? defaultRootTab,
   );
@@ -282,17 +334,20 @@ export function FileWorkspace({
   const [browserTabs, setBrowserTabs] = useState<BrowserWorkspaceTab[]>(
     () => browserTabsFromState(tabsState.browserTabs),
   );
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  // "+" launcher (file search + registry-driven create-new actions:
+  // Side Chat, Terminal, Browser).
+  const [launcherOpen, setLauncherOpen] = useState(false);
+  // Transient feedback when a launcher "create" action (e.g. New Terminal)
+  // fails on the daemon side, so the click is never a silent no-op.
+  const [launcherToast, setLauncherToast] = useState<string | null>(null);
   const [tabsOverflowing, setTabsOverflowing] = useState(false);
-  const [addMenuPos, setAddMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [draggedTabName, setDraggedTabName] = useState<string | null>(null);
   const [dragOverTab, setDragOverTab] = useState<{
     name: string;
     edge: TabDropEdge;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const addButtonRef = useRef<HTMLButtonElement | null>(null);
-  const addMenuRef = useRef<HTMLDivElement | null>(null);
+  const launcherBtnRef = useRef<HTMLButtonElement | null>(null);
   const tabsBarRef = useRef<HTMLDivElement | null>(null);
   const draggedTabNameRef = useRef<string | null>(null);
   const browserTabSequenceRef = useRef(0);
@@ -333,7 +388,7 @@ export function FileWorkspace({
   useEffect(() => {
     setBrowserTabs([]);
     browserTabSequenceRef.current = 0;
-    setAddMenuOpen(false);
+    setLauncherOpen(false);
   }, [projectId]);
 
   useEffect(() => {
@@ -341,45 +396,6 @@ export function FileWorkspace({
     setBrowserTabs(nextBrowserTabs);
     browserTabSequenceRef.current = maxBrowserTabSequence(nextBrowserTabs);
   }, [tabsState.browserTabs]);
-
-  // The add-module menu is portaled to <body> so the tab strip's overflow
-  // clipping (overflow-x: auto turns .ws-tabs-bar into a scroll container that
-  // also clips vertically) cannot hide it. Position it manually from the button
-  // and treat both the button and the portaled menu as "inside" for dismissal.
-  useEffect(() => {
-    if (!addMenuOpen) {
-      setAddMenuPos(null);
-      return;
-    }
-    const updatePosition = () => {
-      const button = addButtonRef.current;
-      if (!button) return;
-      const rect = button.getBoundingClientRect();
-      const viewportWidth =
-        typeof window === 'undefined' ? ADD_MENU_WIDTH : window.innerWidth;
-      const left = Math.max(
-        8,
-        Math.min(rect.right - ADD_MENU_WIDTH, viewportWidth - ADD_MENU_WIDTH - 8),
-      );
-      setAddMenuPos({ top: rect.bottom + 8, left });
-    };
-    updatePosition();
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (addButtonRef.current?.contains(target)) return;
-      if (addMenuRef.current?.contains(target)) return;
-      setAddMenuOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('scroll', updatePosition, true);
-    window.addEventListener('resize', updatePosition);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('scroll', updatePosition, true);
-      window.removeEventListener('resize', updatePosition);
-    };
-  }, [addMenuOpen]);
 
   function workspaceTabsState(
     tabs: string[],
@@ -391,10 +407,17 @@ export function FileWorkspace({
     return state;
   }
 
+  // Single entry point for committing tab state: mirror it into the ref so
+  // async launcher actions read the freshest tabs, then notify the parent.
+  function commitTabsState(next: OpenTabsState) {
+    tabsStateRef.current = next;
+    onTabsStateChange(next);
+  }
+
   function setPersistedActive(name: string | null) {
     const nextActive = name ?? defaultRootTab;
     setActiveTab(nextActive);
-    onTabsStateChange(workspaceTabsState(persistedTabs, name));
+    commitTabsState(workspaceTabsState(persistedTabs, name));
   }
 
   function openBrowserTab() {
@@ -410,8 +433,7 @@ export function FileWorkspace({
     const nextTabs = [...browserTabs, nextTab];
     setBrowserTabs(nextTabs);
     setActiveTab(nextTab.id);
-    onTabsStateChange(workspaceTabsState(persistedTabs, nextTab.id, nextTabs));
-    setAddMenuOpen(false);
+    commitTabsState(workspaceTabsState(persistedTabs, nextTab.id, nextTabs));
   }
 
   function closeBrowserTab(tabId: string) {
@@ -506,10 +528,13 @@ export function FileWorkspace({
 
   function openFile(name: string) {
     setUploadError(null);
-    onTabsStateChange(workspaceTabsState(
-      persistedTabs.includes(name) ? persistedTabs : [...persistedTabs, name],
-      name,
-    ));
+    // Read from the ref, not the `persistedTabs` prop closure: this path is
+    // reached asynchronously from launcher "create" actions (after the daemon
+    // resolves a new terminal/side-chat id), so the closure could be stale and
+    // clobber tabs added in the meantime.
+    const currentTabs = tabsStateRef.current.tabs;
+    const nextTabs = currentTabs.includes(name) ? currentTabs : [...currentTabs, name];
+    commitTabsState(workspaceTabsState(nextTabs, name));
     setActiveTab(name);
   }
 
@@ -1025,6 +1050,41 @@ export function FileWorkspace({
   const isActiveSketch = activeFile?.kind === 'sketch' && isSketchName(activeFile.name);
   const activeSketch = activeFile && isActiveSketch ? sketches[activeFile.name] : null;
 
+  // The "+" launcher's create-new actions come from the registry. `openTab`
+  // reuses the same tab-state path as opening a file so a new chat:<id> /
+  // terminal:<id> tab is focused; `createBrowser` opens a browser-harness tab.
+  // `createSideChat` is only wired when the parent threaded the chat callbacks,
+  // so a chat-less workspace hides that action entirely.
+  // Built fresh each render (not memoized): `createBrowser` closes over
+  // `openBrowserTab`, which reads the live `browserTabs` state — memoizing it
+  // would capture a stale closure and make every "New Browser" click overwrite
+  // the same single tab. The terminal/side-chat actions route through `openFile`
+  // (ref-based), so freshness here is cheap and only matters while the launcher
+  // is open.
+  const launcherContext: LauncherContext = {
+    projectId,
+    openTab: openFile,
+    // Browser is owned by this branch's DesignBrowserPanel: spin up a browser
+    // tab synchronously (no daemon round-trip) and let the launcher close.
+    createBrowser: () => openBrowserTab(),
+    ...(onCreateSideChat
+      ? { createSideChat: () => onCreateSideChat(activeConversationId) }
+      : {}),
+    // Terminal needs only the project id — spawn the PTY here and hand the
+    // resulting session id back so the launcher opens a terminal:<id> tab.
+    // Surface a toast when the daemon can't start one (e.g. node-pty not
+    // compiled) instead of silently no-opping the launcher action.
+    createTerminal: async () => {
+      const term = await createTerminal(projectId);
+      if (!term) {
+        setLauncherToast(t('workspace.terminalStartFailed'));
+        return null;
+      }
+      return term.id;
+    },
+  };
+  const launcherActions = buildLauncherActions(launcherContext);
+
   return (
     <div
       className={[
@@ -1122,10 +1182,36 @@ export function FileWorkspace({
             const onDisk = visibleFiles.find((f) => f.name === name);
             const liveArtifact = liveArtifactEntries.find((entry) => entry.tabId === name);
             const kind = liveArtifact ? 'live-artifact' : onDisk?.kind ?? (isSketchName(name) ? 'sketch' : 'text');
+            const isTerminal = isTerminalTabId(name);
+            const isSideChat = isSideChatTabId(name);
+            // Terminal and side-chat tabs are not files: give them a friendly
+            // label + glyph instead of the raw `terminal:<id>` / `chat:<id>` id.
+            let label: string;
+            if (isTerminal) {
+              // Number multiple terminals so the tabs stay distinguishable.
+              const ordinal = tabNames.filter(isTerminalTabId).indexOf(name) + 1;
+              label =
+                ordinal > 1
+                  ? `${t('workspace.newTerminal')} ${ordinal}`
+                  : t('workspace.newTerminal');
+            } else if (isSideChat) {
+              const conv = conversations.find(
+                (c) => c.id === conversationIdFromSideChatTabId(name),
+              );
+              label = conv?.title?.trim() || t('workspace.sideChatDefaultTitle');
+            } else {
+              label = `${liveArtifact?.title ?? name}${dirtyMark}`;
+            }
+            const iconNameOverride: IconName | undefined = isTerminal
+              ? 'terminal'
+              : isSideChat
+                ? 'comment'
+                : undefined;
             return (
               <Tab
                 key={name}
-                label={`${liveArtifact?.title ?? name}${dirtyMark}`}
+                label={label}
+                iconNameOverride={iconNameOverride}
                 active={activeTab === name}
                 onActivate={() =>
                   isPending ? activatePending(name) : setPersistedActive(name)
@@ -1174,41 +1260,45 @@ export function FileWorkspace({
               />
             );
           })}
-          <div className="ws-add-tab">
-            <button
-              ref={addButtonRef}
-              type="button"
-              className={`ws-tab-add ${addMenuOpen ? 'active' : ''}`}
-              aria-label="Add workspace module"
-              aria-haspopup="menu"
-              aria-expanded={addMenuOpen}
-              title="Add"
-              onClick={() => setAddMenuOpen((open) => !open)}
-            >
-              <Icon name="plus" size={15} />
-            </button>
-          </div>
         </div>
-        {addMenuOpen && addMenuPos
-          ? createPortal(
-              <div
-                ref={addMenuRef}
-                className="ws-add-menu"
-                role="menu"
-                style={{ top: addMenuPos.top, left: addMenuPos.left }}
-              >
-                <button type="button" role="menuitem" onClick={openBrowserTab}>
-                  <Icon name="globe" size={15} />
-                  <span>
-                    <strong>Browser</strong>
-                    <small>Reference sites and browser-harness tasks</small>
-                  </span>
-                </button>
-              </div>,
-              document.body,
-            )
-          : null}
+        {/* Pinned to the right, OUTSIDE the horizontally-scrolling
+            `.ws-tabs-bar`, so the "+" launcher is never clipped by that
+            container's overflow and the middle file tabs scroll between the
+            sticky-left Design Files entry and this button. */}
+        <div className="ws-tabs-actions">
+          <button
+            ref={launcherBtnRef}
+            type="button"
+            className="icon-only ws-tab-add"
+            data-testid="workspace-add-tab"
+            aria-haspopup="dialog"
+            aria-expanded={launcherOpen}
+            title={t('workspace.newTab')}
+            aria-label={t('workspace.newTab')}
+            onClick={() => setLauncherOpen((v) => !v)}
+          >
+            <Icon name="plus" size={15} />
+          </button>
+        </div>
       </div>
+      {launcherOpen ? (
+        <TabLauncherMenu
+          anchor={launcherBtnRef.current}
+          files={visibleFiles}
+          openTabNames={tabNames}
+          actions={launcherActions}
+          launcherContext={launcherContext}
+          onOpenFile={openFile}
+          onClose={() => setLauncherOpen(false)}
+        />
+      ) : null}
+      {launcherToast ? (
+        <Toast
+          message={launcherToast}
+          role="alert"
+          onDismiss={() => setLauncherToast(null)}
+        />
+      ) : null}
       <div className="ws-body">
         {/* Banner moved into DesignFilesPanel for the Design Files tab so
             single-click preview (which keeps activeTab on DESIGN_FILES_TAB)
@@ -1351,6 +1441,31 @@ export function FileWorkspace({
           ) : (
             <div className="viewer-empty">{t('workspace.loadingSketch')}</div>
           )
+        ) : isSideChatTabId(activeTab) && chatConfig && chatAgentsById ? (
+          <SideChatTab
+            key={`${projectId}:${activeTab}`}
+            projectId={projectId}
+            conversationId={conversationIdFromSideChatTabId(activeTab)}
+            config={chatConfig}
+            agentsById={chatAgentsById}
+            locale={chatLocale ?? 'en'}
+            projectFiles={visibleFiles}
+            conversations={conversations}
+            onSelectConversation={onSelectConversation ?? (() => {})}
+            onDeleteConversation={onDeleteConversation ?? (() => {})}
+            onRenameConversation={onRenameConversation}
+            onSessionModeChange={onConversationSessionModeChange}
+            onNewConversation={onNewConversation}
+            activeConversationChat={activeConversationChat}
+            onRequestOpenFile={openFile}
+          />
+        ) : isTerminalTabId(activeTab) ? (
+          <TerminalViewer
+            key={activeTab}
+            projectId={projectId}
+            terminalId={terminalIdFromTabId(activeTab)}
+            onClose={() => closeTab(activeTab)}
+          />
         ) : activeLiveArtifact ? (
           <LiveArtifactViewer
             projectId={projectId}
@@ -2777,6 +2892,7 @@ function Tab({
   onClose,
   closable = true,
   kind,
+  iconNameOverride,
   liveArtifact,
   draggable = false,
   dragging = false,
@@ -2795,6 +2911,8 @@ function Tab({
   onClose?: () => void;
   closable?: boolean;
   kind?: ProjectFile['kind'] | 'live-artifact' | 'browser';
+  /** Force a specific icon (e.g. non-file tabs like terminal:<id> / chat:<id>). */
+  iconNameOverride?: IconName;
   liveArtifact?: LiveArtifactWorkspaceEntry;
   draggable?: boolean;
   dragging?: boolean;
@@ -2806,7 +2924,7 @@ function Tab({
   onDragEnd?: () => void;
 }) {
   const t = useT();
-  const iconName = kindIconName(kind);
+  const iconName = iconNameOverride ?? kindIconName(kind);
   const tabTitle = title ?? (meta ? `${label} ${meta}` : label);
   return (
     <div

@@ -6,6 +6,7 @@ import {
   type MarkdownLinkClickHandler,
 } from "../runtime/markdown";
 import { asInProjectFilePath } from "../runtime/in-project-link";
+import { copyToClipboard } from "../lib/copy-to-clipboard";
 import { projectFileUrl } from "../providers/registry";
 import { submitChatRunToolResult } from "../providers/daemon";
 import { useAnalytics } from "../analytics/provider";
@@ -459,6 +460,7 @@ export function AssistantMessage({
     !!isLast &&
     unfinishedTodos.length > 0 &&
     !!onContinueRemainingTasks;
+  const copyMarkdown = message.content.trim().length > 0 ? message.content : undefined;
   const showFeedback =
     !!onFeedback &&
     isFeedbackEligible({
@@ -474,7 +476,8 @@ export function AssistantMessage({
     !!message.endedAt ||
     !!usage ||
     unfinishedTodos.length > 0 ||
-    hasEmptyResponse;
+    hasEmptyResponse ||
+    !!copyMarkdown;
   // Track which forms the user submitted in this session so we lock them
   // immediately on click (without waiting for the parent to re-render).
   const [locallySubmitted, setLocallySubmitted] = useState<Set<string>>(
@@ -658,6 +661,7 @@ export function AssistantMessage({
                   usage,
                   hasUnfinishedTodos: unfinishedTodos.length > 0,
                   hasEmptyResponse,
+                  copyMarkdown,
                   forceVisible: true,
                 }}
               />
@@ -669,6 +673,7 @@ export function AssistantMessage({
                 usage={usage}
                 hasUnfinishedTodos={unfinishedTodos.length > 0}
                 hasEmptyResponse={hasEmptyResponse}
+                copyMarkdown={copyMarkdown}
               />
             )}
           </div>
@@ -794,6 +799,7 @@ interface AssistantFooterProps {
   usage: Extract<AgentEvent, { kind: "usage" }> | undefined;
   hasUnfinishedTodos: boolean;
   hasEmptyResponse: boolean;
+  copyMarkdown?: string;
   feedbackControls?: ReactNode;
   forceVisible?: boolean;
 }
@@ -805,6 +811,7 @@ function AssistantFooter({
   usage,
   hasUnfinishedTodos,
   hasEmptyResponse,
+  copyMarkdown,
   feedbackControls,
   forceVisible = false,
 }: AssistantFooterProps) {
@@ -816,7 +823,8 @@ function AssistantFooter({
     !elapsed &&
     !usage &&
     !hasUnfinishedTodos &&
-    !hasEmptyResponse
+    !hasEmptyResponse &&
+    !copyMarkdown
   )
     return null;
   return (
@@ -843,8 +851,52 @@ function AssistantFooter({
           ? ` · $${usage.costUsd.toFixed(4)}`
           : ""}
       </span>
-      {feedbackControls}
+      {copyMarkdown || feedbackControls ? (
+        <span className="assistant-footer-controls">
+          {copyMarkdown ? <AssistantMarkdownCopyButton markdown={copyMarkdown} /> : null}
+          {feedbackControls}
+        </span>
+      ) : null}
     </div>
+  );
+}
+
+function AssistantMarkdownCopyButton({ markdown }: { markdown: string }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
+  async function handleCopy() {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    const ok = await copyToClipboard(markdown);
+    if (!ok) return;
+    setCopied(true);
+    copyTimerRef.current = setTimeout(() => {
+      setCopied(false);
+      copyTimerRef.current = undefined;
+    }, 2000);
+  }
+
+  const label = copied ? t("chat.copyDone") : t("assistant.copyMarkdown");
+  return (
+    <button
+      type="button"
+      className="assistant-copy-button"
+      data-copied={copied ? "true" : "false"}
+      onClick={() => {
+        void handleCopy();
+      }}
+      aria-label={label}
+      title={label}
+    >
+      <Icon name={copied ? "check" : "copy"} size={13} />
+    </button>
   );
 }
 

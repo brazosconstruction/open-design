@@ -67,6 +67,7 @@ import {
   exportAsPdf,
   exportProjectAsPdf,
   exportProjectAsZip,
+  copyImageDataUrlToClipboard,
   exportReactComponentAsHtml,
   exportReactComponentAsZip,
   imageDataUrlToBlob,
@@ -4328,6 +4329,7 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
   const [imageExportPreparedBlob, setImageExportPreparedBlob] = useState<{ format: ImageExportFormat; blob: Blob } | null>(null);
   const imageExportSnapshotDataUrlRef = useRef<string | null>(null);
   const imageExportPrepareIdRef = useRef(0);
+  const screenshotInFlightRef = useRef(false);
   const [exportToast, setExportToast] = useState<string | null>(null);
   const [selectedSideCommentIds, setSelectedSideCommentIds] = useState<Set<string>>(() => new Set());
   const [commentSidePanelCollapsed, setCommentSidePanelCollapsed] = useState(false);
@@ -6319,6 +6321,34 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
     useUrlLoadPreview,
   ]);
 
+  const handleCopyScreenshot = useCallback(async () => {
+    if (screenshotInFlightRef.current) return;
+    screenshotInFlightRef.current = true;
+    setExportToast(t('fileViewer.screenshotCopying'));
+    try {
+      const snap = await captureExportImageSnapshot();
+      if (!snap) {
+        setExportToast(t('fileViewer.screenshotPreviewLoading'));
+        return;
+      }
+      const result = await copyImageDataUrlToClipboard(snap.dataUrl);
+      setExportToast(
+        t(
+          result === 'copied'
+            ? 'fileViewer.screenshotCopied'
+            : result === 'denied'
+              ? 'fileViewer.screenshotClipboardDenied'
+              : 'fileViewer.screenshotCaptureFailed',
+        ),
+      );
+    } catch (err) {
+      console.warn('[handleCopyScreenshot] failed:', err);
+      setExportToast(t('fileViewer.screenshotCaptureFailed'));
+    } finally {
+      screenshotInFlightRef.current = false;
+    }
+  }, [captureExportImageSnapshot, t]);
+
   const prepareImageExportBlob = useCallback(async (format: ImageExportFormat) => {
     const prepareId = imageExportPrepareIdRef.current + 1;
     imageExportPrepareIdRef.current = prepareId;
@@ -6840,6 +6870,19 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
         <div className="viewer-toolbar-actions">
           {showPreviewToolbarControls ? (
             <>
+              {mode === 'preview' ? (
+                <button
+                  type="button"
+                  className="viewer-action viewer-action-icon"
+                  data-testid="screenshot-copy-button"
+                  data-tooltip={t('fileViewer.screenshot')}
+                  title={t('fileViewer.screenshot')}
+                  aria-label={t('fileViewer.screenshot')}
+                  onClick={handleCopyScreenshot}
+                >
+                  <RemixIcon name="screenshot-2-line" size={15} />
+                </button>
+              ) : null}
               <div className="artifact-tool-menu-anchor">
                 <button
                   type="button"

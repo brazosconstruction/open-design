@@ -11,6 +11,7 @@ import type { RunContextSelection } from './context.js';
 import type { MediaExecutionPolicy } from './media.js';
 
 export type ChatRole = 'user' | 'assistant';
+export type ChatSessionMode = 'design' | 'chat';
 export type ChatCommentSelectionKind = PreviewCommentSelectionKind | 'visual';
 
 export interface ChatRequest {
@@ -21,6 +22,7 @@ export interface ChatRequest {
   systemPrompt?: string;
   projectId?: string | null;
   conversationId?: string | null;
+  sessionMode?: ChatSessionMode;
   assistantMessageId?: string | null;
   clientRequestId?: string | null;
   skillId?: string | null;

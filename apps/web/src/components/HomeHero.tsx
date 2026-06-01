@@ -26,6 +26,7 @@ import type {
   RefObject,
 } from 'react';
 import type {
+  ChatSessionMode,
   ConnectorDetail,
   InputFieldSpec,
   InstalledPluginRecord,
@@ -56,6 +57,7 @@ import {
 import { PreviewSurface } from './plugins-home/cards/PreviewSurface';
 import { curatedPluginPriorityForChip } from './plugins-home/curatedPriority';
 import { inferPluginPreview } from './plugins-home/preview';
+import { SessionModeToggle } from './SessionModeToggle';
 
 export interface HomeHeroSubmitHandler {
   (): void;
@@ -65,6 +67,8 @@ interface Props {
   prompt: string;
   onPromptChange: (value: string) => void;
   onSubmit: HomeHeroSubmitHandler;
+  sessionMode?: ChatSessionMode;
+  onSessionModeChange?: (mode: ChatSessionMode) => void;
   activePluginTitle: string | null;
   activePluginRecord?: InstalledPluginRecord | null;
   activeChipId: string | null;
@@ -150,6 +154,8 @@ export const HomeHero = forwardRef<HTMLTextAreaElement, Props>(function HomeHero
     prompt,
     onPromptChange,
     onSubmit,
+    sessionMode = 'design',
+    onSessionModeChange,
     activePluginTitle,
     activePluginRecord = null,
     activeSkillId = null,
@@ -1078,6 +1084,11 @@ export const HomeHero = forwardRef<HTMLTextAreaElement, Props>(function HomeHero
             >
               <Icon name="attach" size={15} />
             </button>
+            <SessionModeToggle
+              mode={sessionMode}
+              onChange={onSessionModeChange}
+              disabled={Boolean(submitDisabled)}
+            />
             {activeCreateChip ? (
               <ActiveTypeChip chip={activeCreateChip} onClear={onClearActiveChip} />
             ) : null}

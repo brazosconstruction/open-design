@@ -311,6 +311,47 @@
   border-left: 1px solid var(--border);
   color: var(--text-muted);
 }
+.assistant-footer-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.assistant-footer-controls .assistant-feedback {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: 0;
+}
+.assistant-copy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.assistant-copy-button:hover {
+  background: var(--bg-subtle);
+  border-color: var(--border);
+  color: var(--text-strong);
+}
+.assistant-copy-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.assistant-copy-button[data-copied="true"] {
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-color: var(--accent-soft);
+}
 .assistant-feedback-button {
   position: relative;
   display: inline-flex;
@@ -1474,4 +1515,3 @@ body.desktop-pet-shell .pet-task-item {
   from { opacity: 0; transform: translateY(4px) scale(0.96); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
-
