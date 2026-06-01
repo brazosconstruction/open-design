@@ -830,6 +830,9 @@ export function normalizeCommentAttachments(input) {
       if (selectionKind !== 'visual' && !selector) return null;
       if (selectionKind === 'visual' && !screenshotPath) return null;
       const podMembers = selectionKind === 'pod' ? normalizeAttachmentPodMembers(raw.podMembers) : [];
+      const slideIndex = Number.isFinite(raw.slideIndex)
+        ? Math.max(0, Math.round(raw.slideIndex))
+        : undefined;
       const memberCount =
         selectionKind === 'pod'
           ? (podMembers.length > 0
@@ -851,6 +854,7 @@ export function normalizeCommentAttachments(input) {
         currentText: compactString(raw.currentText, 160),
         pagePosition: normalizeAttachmentPosition(raw.pagePosition),
         htmlHint: compactString(raw.htmlHint, 180),
+        slideIndex,
         style: normalizeAnnotationStyle(raw.style),
         selectionKind,
         memberCount,
@@ -885,6 +889,7 @@ export function renderCommentAttachmentHint(commentAttachments) {
       `file: ${item.filePath}`,
       `label: ${item.label || '(unlabeled)'}`,
       `position: ${formatAttachmentPosition(item.pagePosition)}`,
+      ...(Number.isFinite(item.slideIndex) ? [`slideIndex: ${item.slideIndex}`] : []),
       `currentText: ${item.currentText || '(empty)'}`,
       `htmlHint: ${item.htmlHint || '(none)'}`,
       `computedStyle: ${formatAnnotationStyle(item.style) || '(none)'}`,

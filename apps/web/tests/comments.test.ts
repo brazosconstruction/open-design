@@ -204,7 +204,7 @@ describe('preview comment attachment helpers', () => {
     });
   });
 
-  it('only resolves saved markers from live snapshots for the same file', () => {
+  it('only uses live saved marker snapshots for the same file', () => {
     const saved = comment({ filePath: 'index.html', elementId: 'hero-title' });
     const snapshots = new Map([
       ['hero-title', {
@@ -219,26 +219,91 @@ describe('preview comment attachment helpers', () => {
     ]);
 
     expect(liveSnapshotForComment(saved, snapshots)?.elementId).toBe('hero-title');
-    expect(liveSnapshotForComment(comment({ filePath: 'other.html' }), snapshots)).toBeNull();
+    expect(liveSnapshotForComment(comment({
+      filePath: 'other.html',
+      elementId: 'hero-title',
+      position: { x: 8, y: 9, width: 10, height: 11 },
+    }), snapshots)).toBeNull();
   });
 
-  it('rehydrates saved free-pin markers from persisted comment position after iframe reload', () => {
+  it('hides ordinary element comments when the iframe no longer reports their target', () => {
     const saved = comment({
-      elementId: 'pin-abc123',
-      selector: '[data-od-pin="pin-abc123"]',
-      label: 'pin',
-      text: '',
-      htmlHint: '',
+      elementId: 'hero-title',
+      selector: '[data-od-id="hero-title"]',
+      label: 'Hero title',
+      text: 'Hero title',
+      htmlHint: '<h1 data-od-id="hero-title">Hero title</h1>',
       position: { x: 88, y: 144, width: 24, height: 24 },
     });
 
-    expect(liveSnapshotForComment(saved, new Map())).toMatchObject({
-      filePath: 'index.html',
-      elementId: 'pin-abc123',
-      selector: '[data-od-pin="pin-abc123"]',
-      label: 'pin',
+    expect(liveSnapshotForComment(saved, new Map())).toBeNull();
+  });
+
+  it('rehydrates free pins and deck-scoped saved markers from persisted positions', () => {
+    const pin = comment({
+      elementId: 'pin-hero',
+      selector: '[data-od-pin="pin-hero"]',
+      label: 'Pin',
       position: { x: 88, y: 144, width: 24, height: 24 },
     });
+    const deckScoped = comment({
+      elementId: 'hero-title',
+      selector: '[data-od-id="hero-title"]',
+      label: 'Hero title',
+      text: 'Hero title',
+      htmlHint: '<h1 data-od-id="hero-title">Hero title</h1>',
+      slideIndex: 0,
+      position: { x: 120, y: 80, width: 240, height: 64 },
+    });
+
+    expect(liveSnapshotForComment(pin, new Map())).toMatchObject({
+      filePath: 'index.html',
+      elementId: 'pin-hero',
+      position: { x: 88, y: 144, width: 24, height: 24 },
+    });
+    expect(liveSnapshotForComment(deckScoped, new Map())).toMatchObject({
+      filePath: 'index.html',
+      elementId: 'hero-title',
+      selector: '[data-od-id="hero-title"]',
+      label: 'Hero title',
+      slideIndex: 0,
+      position: { x: 120, y: 80, width: 240, height: 64 },
+    });
+  });
+
+  it('hides deck-scoped element comments once bridge targets are hydrated without that element', () => {
+    const deckScoped = comment({
+      elementId: 'hero-title',
+      selector: '[data-od-id="hero-title"]',
+      label: 'Hero title',
+      slideIndex: 0,
+      position: { x: 120, y: 80, width: 240, height: 64 },
+    });
+    const hydratedTargets = new Map([
+      ['other-title', {
+        filePath: 'index.html',
+        elementId: 'other-title',
+        selector: '[data-od-id="other-title"]',
+        label: 'Other title',
+        text: '',
+        htmlHint: '',
+        position: { x: 24, y: 32, width: 180, height: 40 },
+      }],
+    ]);
+
+    expect(liveSnapshotForComment(deckScoped, hydratedTargets)).toBeNull();
+  });
+
+  it('hides deck-scoped element comments after an empty bridge target hydration', () => {
+    const deckScoped = comment({
+      elementId: 'hero-title',
+      selector: '[data-od-id="hero-title"]',
+      label: 'Hero title',
+      slideIndex: 0,
+      position: { x: 120, y: 80, width: 240, height: 64 },
+    });
+
+    expect(liveSnapshotForComment(deckScoped, new Map(), { targetsHydrated: true })).toBeNull();
   });
 
   it('serializes selected comments into API-mode prompt context without visible input', () => {

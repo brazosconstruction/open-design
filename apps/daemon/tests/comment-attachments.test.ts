@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import {
   closeDatabase,
   deleteConversation,
@@ -49,11 +50,107 @@ describe('preview comment persistence', () => {
     const critiqueTable = db
       .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='critique_runs'`)
       .get() as { name?: string } | undefined;
+    const identityIndex = db
+      .prepare(`SELECT sql FROM sqlite_master WHERE type='index' AND name='ux_preview_comments_identity'`)
+      .get() as { sql?: string } | undefined;
 
     expect(tableColumnNames(previewColumns)).toEqual(
-      expect.arrayContaining(['selection_kind', 'member_count', 'pod_members_json']),
+      expect.arrayContaining(['selection_kind', 'member_count', 'pod_members_json', 'slide_index']),
     );
     expect(critiqueTable?.name).toBe('critique_runs');
+    expect(identityIndex?.sql).toContain('COALESCE(slide_index, -1)');
+  });
+
+  it('migrates the legacy preview comment unique key to include slide scope', () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'od-comments-'));
+    const odDir = path.join(tempDir, '.od');
+    fs.mkdirSync(odDir, { recursive: true });
+    const legacy = new Database(path.join(odDir, 'app.sqlite'));
+    legacy.exec(`
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        skill_id TEXT,
+        design_system_id TEXT,
+        pending_prompt TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE conversations (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        title TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+      CREATE TABLE preview_comments (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        element_id TEXT NOT NULL,
+        selector TEXT NOT NULL,
+        label TEXT NOT NULL,
+        text TEXT NOT NULL,
+        position_json TEXT NOT NULL,
+        html_hint TEXT NOT NULL,
+        note TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(project_id, conversation_id, file_path, element_id),
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+      );
+      INSERT INTO projects (id, name, created_at, updated_at)
+      VALUES ('project-1', 'Project', 1, 1);
+      INSERT INTO conversations (id, project_id, title, created_at, updated_at)
+      VALUES ('conversation-1', 'project-1', 'Chat', 1, 1);
+      INSERT INTO preview_comments
+        (id, project_id, conversation_id, file_path, element_id, selector, label,
+         text, position_json, html_hint, note, status, created_at, updated_at)
+      VALUES
+        ('legacy-comment', 'project-1', 'conversation-1', 'index.html', 'hero-title',
+         '[data-od-id="hero-title"]', 'Hero title', 'Hero title',
+         '{"x":10,"y":20,"width":300,"height":80}', '<h1 data-od-id="hero-title">',
+         'Legacy note', 'open', 1, 1);
+    `);
+    legacy.close();
+
+    const db = openDatabase(tempDir);
+    const table = db
+      .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='preview_comments'`)
+      .get() as { sql?: string } | undefined;
+    const identityIndex = db
+      .prepare(`SELECT sql FROM sqlite_master WHERE type='index' AND name='ux_preview_comments_identity'`)
+      .get() as { sql?: string } | undefined;
+    const comments = listPreviewComments(db, 'project-1', 'conversation-1');
+
+    expect(table?.sql).not.toContain('UNIQUE(project_id, conversation_id, file_path, element_id)');
+    expect(identityIndex?.sql).toContain('COALESCE(slide_index, -1)');
+    expect(comments).toHaveLength(1);
+    expect(comments[0]?.id).toBe('legacy-comment');
+    expect(comments[0]?.note).toBe('Legacy note');
+    expect(comments[0]?.slideIndex).toBeUndefined();
+
+    const scoped = upsertPreviewComment(db, 'project-1', 'conversation-1', {
+      target: target({ elementId: 'hero-title', slideIndex: 1 }),
+      note: 'New scoped note',
+    });
+
+    expect(scoped?.id).not.toBe('legacy-comment');
+    const afterScopedSave = listPreviewComments(db, 'project-1', 'conversation-1');
+    expect(afterScopedSave).toHaveLength(2);
+    expect(afterScopedSave.find((comment) => comment.id === 'legacy-comment')).toMatchObject({
+      note: 'Legacy note',
+    });
+    expect(afterScopedSave.find((comment) => comment.id === 'legacy-comment')?.slideIndex).toBeUndefined();
+    expect(afterScopedSave.find((comment) => comment.id === scoped?.id)).toMatchObject({
+      note: 'New scoped note',
+      slideIndex: 1,
+    });
   });
 
   it('upserts the latest comment by conversation, file, and element', () => {
@@ -73,6 +170,110 @@ describe('preview comment persistence', () => {
     expect(second.id).toBe(first.id);
     expect(second.note).toBe('Make it more specific');
     expect(second.text).toBe('New title');
+    expect(listPreviewComments(db, 'project-1', 'conversation-1')).toHaveLength(1);
+  });
+
+  it('persists the deck slide index with preview comments', () => {
+    const db = seededDb();
+    const saved = upsertPreviewComment(db, 'project-1', 'conversation-1', {
+      target: target({ elementId: 'pin-slide-one', slideIndex: 1 }),
+      note: 'Fix this slide',
+    });
+
+    expect(saved?.slideIndex).toBe(1);
+    expect(listPreviewComments(db, 'project-1', 'conversation-1')[0]?.slideIndex).toBe(1);
+  });
+
+  it('keeps comments for the same deck element on different slides', () => {
+    const db = seededDb();
+    const first = upsertPreviewComment(db, 'project-1', 'conversation-1', {
+      target: target({ elementId: 'shared-title', slideIndex: 0 }),
+      note: 'Fix slide one',
+    });
+    const second = upsertPreviewComment(db, 'project-1', 'conversation-1', {
+      target: target({ elementId: 'shared-title', slideIndex: 1 }),
+      note: 'Fix slide two',
+    });
+    const secondUpdated = upsertPreviewComment(db, 'project-1', 'conversation-1', {
+      target: target({ elementId: 'shared-title', slideIndex: 1, text: 'Updated title' }),
+      note: 'Update only slide two',
+    });
+
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    expect(secondUpdated).not.toBeNull();
+    if (!first || !second || !secondUpdated) throw new Error('comment upsert failed');
+    expect(second.id).not.toBe(first.id);
+    expect(secondUpdated.id).toBe(second.id);
+    expect(secondUpdated.note).toBe('Update only slide two');
+    expect(listPreviewComments(db, 'project-1', 'conversation-1')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: first.id, slideIndex: 0, note: 'Fix slide one' }),
+        expect.objectContaining({ id: second.id, slideIndex: 1, note: 'Update only slide two' }),
+      ]),
+    );
+    expect(listPreviewComments(db, 'project-1', 'conversation-1')).toHaveLength(2);
+  });
+
+  it('does not expose a stale lookup before inserting duplicate slide-scoped comments', () => {
+    const db = seededDb();
+    const originalPrepare = db.prepare.bind(db);
+    const duplicateSlideIndex = 2;
+    const duplicateTarget = target({ elementId: 'shared-title', slideIndex: duplicateSlideIndex });
+    let injectedDuplicate = false;
+
+    (db as unknown as { prepare: typeof db.prepare }).prepare = ((source: string) => {
+      const statement = originalPrepare(source);
+      if (
+        source.includes('INSERT INTO preview_comments') &&
+        source.includes('ON CONFLICT(project_id, conversation_id, file_path, element_id, COALESCE(slide_index, -1))')
+      ) {
+        const originalGet = statement.get.bind(statement);
+        statement.get = (...args: unknown[]) => {
+          if (!injectedDuplicate) {
+            injectedDuplicate = true;
+            originalPrepare(
+              `INSERT INTO preview_comments
+                 (id, project_id, conversation_id, file_path, element_id, selector, label,
+                  text, position_json, html_hint, slide_index, selection_kind, member_count,
+                  pod_members_json, style_json, note, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(
+              'competing-comment',
+              'project-1',
+              'conversation-1',
+              duplicateTarget.filePath,
+              duplicateTarget.elementId,
+              duplicateTarget.selector,
+              duplicateTarget.label,
+              duplicateTarget.text,
+              JSON.stringify(duplicateTarget.position),
+              duplicateTarget.htmlHint,
+              duplicateSlideIndex,
+              'element',
+              null,
+              null,
+              null,
+              'Competing note',
+              'open',
+              1,
+              1,
+            );
+          }
+          return originalGet(...args);
+        };
+      }
+      return statement;
+    }) as typeof db.prepare;
+
+    const saved = upsertPreviewComment(db, 'project-1', 'conversation-1', {
+      target: duplicateTarget,
+      note: 'Latest note',
+    });
+
+    expect(injectedDuplicate).toBe(true);
+    expect(saved?.note).toBe('Latest note');
+    expect(saved?.slideIndex).toBe(2);
     expect(listPreviewComments(db, 'project-1', 'conversation-1')).toHaveLength(1);
   });
 
@@ -156,6 +357,7 @@ describe('preview comment agent payload', () => {
     const normalized = normalizeCommentAttachments([
       commentAttachment({
         id: 'c1',
+        slideIndex: 2,
         comment: 'Make the headline shorter',
         currentText: 'A very long headline '.repeat(20),
         htmlHint: `<h1>${'x'.repeat(240)}</h1>`,
@@ -169,6 +371,7 @@ describe('preview comment agent payload', () => {
     expect(normalized[0]?.htmlHint.length).toBeLessThanOrEqual(180);
     expect(hint).toContain('<attached-preview-comments>');
     expect(hint).toContain('file: index.html');
+    expect(hint).toContain('slideIndex: 2');
     expect(hint).toContain('selector: [data-od-id="hero-title"]');
     expect(hint).toContain('comment: Make the headline shorter');
   });

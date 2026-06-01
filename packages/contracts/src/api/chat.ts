@@ -247,6 +247,7 @@ export interface ChatCommentAttachment {
   currentText: string;
   pagePosition: PreviewCommentPosition;
   htmlHint: string;
+  slideIndex?: number;
   style?: PreviewAnnotationStyle;
   selectionKind?: ChatCommentSelectionKind;
   memberCount?: number;

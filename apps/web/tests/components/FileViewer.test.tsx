@@ -1636,6 +1636,8 @@ describe('FileViewer tweaks toolbar', () => {
       'chat.comments.emptySaved': 'No saved comments.',
       'chat.comments.targetText': 'Text',
       'chat.comments.targetLink': 'Link',
+      'chat.comments.sendToChat': 'Send to Chat',
+      'chat.comments.sending': 'Sending',
       'chat.comments.selectAll': 'Select all',
       'common.close': 'Close',
       'common.delete': 'Delete',
@@ -2080,6 +2082,406 @@ describe('FileViewer tweaks toolbar', () => {
     });
     expect(screen.getByTestId('comment-active-pin').textContent).toBe('1');
     expect(document.querySelector('[data-comment-id="comment-older"]')?.className).not.toContain('active');
+  });
+
+  it('shows deck comments only on their slide and restores them when returning', async () => {
+    const slideOneComment: PreviewComment = {
+      id: 'comment-slide-one',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'pin-slide-one',
+      selector: '[data-od-pin="pin-slide-one"]',
+      label: 'pin-slide-one',
+      text: '',
+      htmlHint: '',
+      slideIndex: 0,
+      position: { x: 24, y: 32, width: 18, height: 18 },
+      note: 'Only on the first slide',
+      status: 'open',
+      createdAt: 10,
+      updatedAt: 10,
+    };
+
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={htmlPreviewFile()}
+        liveHtml='<html><body><section class="slide">one</section><section class="slide">two</section></body></html>'
+        previewComments={[slideOneComment]}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    const frame = screen.getByTestId('artifact-preview-frame') as HTMLIFrameElement;
+
+    expect(screen.getByTestId('comment-saved-marker-pin-slide-one')).toBeTruthy();
+    expect(screen.getByText('Only on the first slide')).toBeTruthy();
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: { type: 'od:slide-state', active: 1, count: 2 },
+    }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('comment-saved-marker-pin-slide-one')).toBeNull();
+      expect(screen.queryByText('Only on the first slide')).toBeNull();
+    });
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: { type: 'od:slide-state', active: 0, count: 2 },
+    }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('comment-saved-marker-pin-slide-one')).toBeTruthy();
+      expect(screen.getByText('Only on the first slide')).toBeTruthy();
+    });
+  });
+
+  it('keeps legacy deck comments without slide index visible while changing slides', async () => {
+    const legacyComment: PreviewComment = {
+      id: 'comment-legacy-slide',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'pin-legacy-slide',
+      selector: '[data-od-pin="pin-legacy-slide"]',
+      label: 'pin-legacy-slide',
+      text: '',
+      htmlHint: '',
+      position: { x: 24, y: 32, width: 18, height: 18 },
+      note: 'Created before slide scoping',
+      status: 'open',
+      createdAt: 10,
+      updatedAt: 10,
+    };
+
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={htmlPreviewFile()}
+        liveHtml='<html><body><section class="slide">one</section><section class="slide">two</section></body></html>'
+        previewComments={[legacyComment]}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    const frame = screen.getByTestId('artifact-preview-frame') as HTMLIFrameElement;
+
+    expect(screen.getByTestId('comment-saved-marker-pin-legacy-slide')).toBeTruthy();
+    expect(screen.getByText('Created before slide scoping')).toBeTruthy();
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: { type: 'od:slide-state', active: 1, count: 2 },
+    }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('comment-saved-marker-pin-legacy-slide')).toBeTruthy();
+      expect(screen.getByText('Created before slide scoping')).toBeTruthy();
+    });
+  });
+
+  it('updates an unscoped legacy deck comment in place when targeting the same element on another slide', async () => {
+    const legacyComment: PreviewComment = {
+      id: 'comment-legacy-edit-target',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'legacy-target.html',
+      elementId: 'hero-legacy',
+      selector: '[data-od-id="hero-legacy"]',
+      label: 'Hero legacy',
+      text: 'Hero legacy',
+      htmlHint: '<h1 data-od-id="hero-legacy">Hero legacy</h1>',
+      position: { x: 48, y: 64, width: 240, height: 72 },
+      note: 'Legacy unscoped note',
+      status: 'open',
+      createdAt: 10,
+      updatedAt: 10,
+    };
+    const savedTargets: unknown[] = [];
+
+    function Harness() {
+      const [comments, setComments] = useState<PreviewComment[]>([legacyComment]);
+      return (
+        <FileViewer
+          projectId="project-1"
+          projectKind="prototype"
+          file={htmlPreviewFile({ name: 'legacy-target.html', path: 'legacy-target.html' })}
+          liveHtml='<html><body><section class="slide"><h1 data-od-id="hero-legacy">One</h1></section><section class="slide"><h1 data-od-id="hero-legacy">Two</h1></section></body></html>'
+          previewComments={comments}
+          onSavePreviewComment={async (target, note) => {
+            savedTargets.push(target);
+            const saved: PreviewComment = {
+              ...legacyComment,
+              ...target,
+              note,
+              updatedAt: 20,
+            };
+            setComments(Number.isFinite(target.slideIndex) ? [
+              legacyComment,
+              { ...saved, id: 'comment-scoped-copy' },
+            ] : [saved]);
+            return saved;
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    await waitFor(() => {
+      expect(screen.getByTestId('comment-panel-toggle').getAttribute('aria-pressed')).toBe('true');
+    });
+    const frame = screen.getByTestId('artifact-preview-frame') as HTMLIFrameElement;
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: { type: 'od:slide-state', active: 1, count: 2 },
+    }));
+    await waitFor(() => expect(screen.getByText('2 / 2')).toBeTruthy());
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: {
+        type: 'od:comment-target',
+        elementId: 'hero-legacy',
+        selector: '[data-od-id="hero-legacy"]',
+        label: 'Hero legacy',
+        text: 'Hero legacy two',
+        position: { x: 60, y: 72, width: 240, height: 72 },
+        htmlHint: '<h1 data-od-id="hero-legacy">Two</h1>',
+      },
+    }));
+
+    const input = await screen.findByTestId('comment-popover-input') as HTMLTextAreaElement;
+    expect(input.value).toBe('Legacy unscoped note');
+    fireEvent.change(input, { target: { value: 'Updated legacy note' } });
+    fireEvent.click(screen.getByTestId('comment-popover-save'));
+
+    await waitFor(() => expect(savedTargets).toHaveLength(1));
+    expect(savedTargets[0]).toEqual(expect.objectContaining({
+      elementId: 'hero-legacy',
+      filePath: 'legacy-target.html',
+    }));
+    expect(savedTargets[0]).not.toHaveProperty('slideIndex');
+
+    await waitFor(() => expect(screen.queryByTestId('comment-popover')).toBeNull());
+    expect(screen.getByText('Updated legacy note')).toBeTruthy();
+    const sidePanel = screen.getByTestId('comment-side-panel');
+    expect(sidePanel.querySelectorAll('[data-comment-id]')).toHaveLength(1);
+    expect(document.querySelector('[data-comment-id="comment-scoped-copy"]')).toBeNull();
+  });
+
+  it('keeps legacy deck comment edits unscoped after bridge target refreshes', async () => {
+    const legacyComment: PreviewComment = {
+      id: 'comment-legacy-side-edit',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'legacy-edit.html',
+      elementId: 'hero-legacy',
+      selector: '[data-od-id="hero-legacy"]',
+      label: 'Hero legacy',
+      text: 'Hero legacy',
+      htmlHint: '<h1 data-od-id="hero-legacy">Hero legacy</h1>',
+      position: { x: 48, y: 64, width: 240, height: 72 },
+      note: 'Legacy unscoped note',
+      status: 'open',
+      createdAt: 10,
+      updatedAt: 10,
+    };
+    const onSavePreviewComment = vi.fn(async (target, note) => ({
+      ...legacyComment,
+      ...target,
+      note,
+      updatedAt: 20,
+    }));
+
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={htmlPreviewFile({ name: 'legacy-edit.html', path: 'legacy-edit.html' })}
+        liveHtml='<html><body><section class="slide"><h1 data-od-id="hero-legacy">One</h1></section><section class="slide"><h1 data-od-id="hero-legacy">Two</h1></section></body></html>'
+        previewComments={[legacyComment]}
+        onSavePreviewComment={onSavePreviewComment}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    const frame = screen.getByTestId('artifact-preview-frame') as HTMLIFrameElement;
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: { type: 'od:slide-state', active: 1, count: 2 },
+    }));
+
+    const sideItem = await waitFor(() => document.querySelector('[data-comment-id="comment-legacy-side-edit"]'));
+    if (!sideItem) throw new Error('expected legacy comment in side panel');
+    fireEvent.click(sideItem);
+    const input = await screen.findByTestId('comment-popover-input') as HTMLTextAreaElement;
+    expect(input.value).toBe('Legacy unscoped note');
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: {
+        type: 'od:comment-active-target-update',
+        elementId: 'hero-legacy',
+        selector: '[data-od-id="hero-legacy"]',
+        label: 'Hero legacy',
+        text: 'Hero legacy two',
+        position: { x: 60, y: 72, width: 240, height: 72 },
+        htmlHint: '<h1 data-od-id="hero-legacy">Two</h1>',
+      },
+    }));
+
+    fireEvent.change(input, { target: { value: 'Updated legacy note' } });
+    fireEvent.click(screen.getByTestId('comment-popover-save'));
+
+    await waitFor(() => expect(onSavePreviewComment).toHaveBeenCalled());
+    expect(onSavePreviewComment.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      elementId: 'hero-legacy',
+      filePath: 'legacy-edit.html',
+    }));
+    expect(onSavePreviewComment.mock.calls[0]?.[0]).not.toHaveProperty('slideIndex');
+  });
+
+  it('rehydrates saved deck element comment markers before iframe targets report', async () => {
+    const slideOneComment: PreviewComment = {
+      id: 'comment-slide-one-element',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'rehydrate-preview.html',
+      elementId: 'hero-slide-one',
+      selector: '[data-od-id="hero-slide-one"]',
+      label: 'Hero heading',
+      text: 'Hero heading',
+      htmlHint: '<h1 data-od-id="hero-slide-one">Hero heading</h1>',
+      slideIndex: 0,
+      position: { x: 120, y: 80, width: 240, height: 64 },
+      note: 'Keep this heading visible',
+      status: 'open',
+      createdAt: 10,
+      updatedAt: 10,
+    };
+
+    render(
+      <FileViewer
+        projectId="project-1"
+        projectKind="prototype"
+        file={htmlPreviewFile({ name: 'rehydrate-preview.html', path: 'rehydrate-preview.html' })}
+        liveHtml='<html><body><section class="slide"><h1 data-od-id="hero-slide-one">Hero heading</h1></section><section class="slide">two</section></body></html>'
+        previewComments={[slideOneComment]}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    const frame = screen.getByTestId('artifact-preview-frame') as HTMLIFrameElement;
+
+    expect(screen.getByTestId('comment-saved-marker-hero-slide-one')).toBeTruthy();
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: { type: 'od:slide-state', active: 1, count: 2 },
+    }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('comment-saved-marker-hero-slide-one')).toBeNull();
+    });
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: { type: 'od:slide-state', active: 0, count: 2 },
+    }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('comment-saved-marker-hero-slide-one')).toBeTruthy();
+    });
+  });
+
+  it('hides saved deck element comment markers after empty iframe targets hydrate', async () => {
+    const slideOneComment: PreviewComment = {
+      id: 'comment-slide-empty-targets',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'empty-targets-preview.html',
+      elementId: 'hero-empty-targets',
+      selector: '[data-od-id="hero-empty-targets"]',
+      label: 'Hero heading',
+      text: 'Hero heading',
+      htmlHint: '<h1 data-od-id="hero-empty-targets">Hero heading</h1>',
+      slideIndex: 0,
+      position: { x: 120, y: 80, width: 240, height: 64 },
+      note: 'Old marker should disappear',
+      status: 'open',
+      createdAt: 10,
+      updatedAt: 10,
+    };
+    const savedTargets: unknown[] = [];
+
+    function Harness() {
+      const [comments, setComments] = useState<PreviewComment[]>([slideOneComment]);
+      return (
+        <FileViewer
+          projectId="project-1"
+          projectKind="prototype"
+          file={htmlPreviewFile({ name: 'empty-targets-preview.html', path: 'empty-targets-preview.html' })}
+          liveHtml='<html><body><section class="slide"><h1>Removed heading</h1></section></body></html>'
+          previewComments={comments}
+          onSavePreviewComment={async (target, note) => {
+            savedTargets.push(target);
+            const saved: PreviewComment = {
+              ...slideOneComment,
+              ...target,
+              note,
+              updatedAt: 20,
+            };
+            setComments(Number.isFinite(target.slideIndex) ? [saved] : [
+              slideOneComment,
+              { ...saved, id: 'comment-unscoped-copy' },
+            ]);
+            return saved;
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+
+    fireEvent.click(screen.getByTestId('comment-panel-toggle'));
+    const frame = screen.getByTestId('artifact-preview-frame') as HTMLIFrameElement;
+
+    expect(screen.getByTestId('comment-saved-marker-hero-empty-targets')).toBeTruthy();
+
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: { type: 'od:comment-targets', targets: [] },
+    }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('comment-saved-marker-hero-empty-targets')).toBeNull();
+    });
+
+    const sideItem = await waitFor(() => document.querySelector('[data-comment-id="comment-slide-empty-targets"]'));
+    if (!sideItem) throw new Error('expected scoped comment in side panel');
+    fireEvent.click(sideItem);
+
+    const input = await screen.findByTestId('comment-popover-input') as HTMLTextAreaElement;
+    expect(input.value).toBe('Old marker should disappear');
+    fireEvent.change(input, { target: { value: 'Updated scoped note' } });
+    fireEvent.click(screen.getByTestId('comment-popover-save'));
+
+    await waitFor(() => expect(savedTargets).toHaveLength(1));
+    expect(savedTargets[0]).toEqual(expect.objectContaining({
+      elementId: 'hero-empty-targets',
+      filePath: 'empty-targets-preview.html',
+      slideIndex: 0,
+    }));
+    expect(document.querySelector('[data-comment-id="comment-unscoped-copy"]')).toBeNull();
   });
 
   it('orders and timestamps side comments by latest update time', () => {
@@ -2680,6 +3082,48 @@ describe('FileViewer tweaks toolbar', () => {
     expect(screen.queryByText('不要github，换成微信')).toBeNull();
     expect(screen.queryByTestId('comment-side-selectbar')).toBeNull();
     expect(screen.queryByTestId('comment-side-collapsed-rail')).toBeNull();
+  });
+
+  it('does not label the comment panel action as sending when only blocked by streaming', () => {
+    const comment: PreviewComment = {
+      id: 'comment-1',
+      projectId: 'project-1',
+      conversationId: 'conversation-1',
+      filePath: 'preview.html',
+      elementId: 'pin-1',
+      selector: '[data-od-pin="pin-1"]',
+      label: 'pin',
+      text: '',
+      htmlHint: '',
+      position: { x: 16, y: 24, width: 24, height: 24 },
+      note: 'Send this after the run finishes',
+      status: 'open',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    render(
+      <CommentSidePanel
+        comments={[comment]}
+        selectedIds={new Set(['comment-1'])}
+        activeCommentId={null}
+        collapsed={false}
+        onCollapsedChange={() => {}}
+        onClose={() => {}}
+        onToggleSelect={() => {}}
+        onSelectAll={() => {}}
+        onClearSelection={() => {}}
+        onReply={() => {}}
+        onSendSelected={() => {}}
+        sending={false}
+        sendDisabled
+        t={t}
+      />,
+    );
+
+    const sendButton = screen.getByTestId('comment-side-send-claude') as HTMLButtonElement;
+    expect(sendButton.disabled).toBe(true);
+    expect(sendButton.textContent).toBe('Send to Chat');
   });
 
   it('does not classify text labels containing a standalone article as links', () => {

@@ -51,6 +51,7 @@ export interface PreviewCommentTarget {
   text: string;
   position: PreviewCommentPosition;
   htmlHint: string;
+  slideIndex?: number;
   style?: PreviewAnnotationStyle;
   selectionKind?: PreviewCommentSelectionKind;
   memberCount?: number;
@@ -68,6 +69,7 @@ export interface PreviewComment {
   text: string;
   position: PreviewCommentPosition;
   htmlHint: string;
+  slideIndex?: number;
   style?: PreviewAnnotationStyle;
   selectionKind?: PreviewCommentSelectionKind;
   memberCount?: number;
