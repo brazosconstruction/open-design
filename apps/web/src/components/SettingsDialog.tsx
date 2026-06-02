@@ -939,7 +939,12 @@ export function SettingsDialog({
     const hasAmrAgent = agents.some((agent) => agent.id === 'amr' && agent.available);
     if (!hasAmrAgent) return;
     const onAmrStatusChange = (event: Event) => {
-      if (amrLoginStatusEventReason(event) === 'login-canceled') return;
+      if (amrLoginStatusEventReason(event) === 'login-canceled') {
+        setAmrCardStatus((current) => (
+          current ? { ...current, loginInFlight: false } : current
+        ));
+        return;
+      }
       refreshAmrCardStatus();
     };
     window.addEventListener(AMR_LOGIN_STATUS_EVENT, onAmrStatusChange);

@@ -494,6 +494,31 @@ HKEY_CURRENT_USER\\Environment
     expect(userEnvironmentQueryCount).toBe(1);
   });
 
+  it("resolves Windows REG_EXPAND_SZ proxy values from inherited env", () => {
+    const original = process.env.SYSTEM_PROXY_ROOT;
+    process.env.SYSTEM_PROXY_ROOT = "system-proxy";
+    try {
+      const env = resolveSystemProxyEnv({
+        platform: "win32",
+        runCommand(_command, args) {
+          if (args.includes("HKCU\\Environment")) {
+            return `
+HKEY_CURRENT_USER\\Environment
+    HTTPS_PROXY    REG_EXPAND_SZ    http://%SYSTEM_PROXY_ROOT%:7890
+`;
+          }
+          return "";
+        },
+      });
+
+      expect(env.HTTPS_PROXY).toBe("http://system-proxy:7890");
+      expect(env.NODE_USE_ENV_PROXY).toBe("1");
+    } finally {
+      if (original == null) delete process.env.SYSTEM_PROXY_ROOT;
+      else process.env.SYSTEM_PROXY_ROOT = original;
+    }
+  });
+
   it("lets Windows user-level proxy env override Internet Settings proxy values", () => {
     const env = resolveSystemProxyEnv({
       platform: "win32",

@@ -469,8 +469,10 @@ export function resolveSystemProxyEnv(options: ResolveSystemProxyEnvOptions = {}
     }
     if (platform === "win32") {
       const userEnvironmentOutput = tryRun("reg", ["query", "HKCU\\Environment"]);
-      const userEnvironmentExpansionEnv =
-        parseWindowsUserEnvironmentExpansionEnv(userEnvironmentOutput);
+      const userEnvironmentExpansionEnv = {
+        ...process.env,
+        ...parseWindowsUserEnvironmentExpansionEnv(userEnvironmentOutput),
+      };
       return mergeProxyAwareEnv(
         platform,
         parseWindowsInternetSettingsProxyOutput(
