@@ -19,7 +19,6 @@ export interface PreviewCommentSnapshot {
   position: { x: number; y: number; width: number; height: number };
   hoverPoint?: { x: number; y: number };
   htmlHint: string;
-  slideIndex?: number;
   style?: PreviewAnnotationStyle;
   selectionKind?: PreviewCommentSelectionKind;
   memberCount?: number;
@@ -41,7 +40,6 @@ export interface VisualAnnotationTarget {
   text?: string;
   position?: { x: number; y: number; width: number; height: number };
   htmlHint?: string;
-  slideIndex?: number;
   style?: PreviewAnnotationStyle;
 }
 
@@ -78,7 +76,6 @@ export function commentTargetDisplayName(
 
 export function targetFromSnapshot(snapshot: PreviewCommentSnapshot): PreviewCommentTarget {
   const podMembers = normalizeMembers(snapshot.podMembers);
-  const slideIndex = normalizeSlideIndex(snapshot.slideIndex);
   return {
     filePath: snapshot.filePath,
     elementId: snapshot.elementId,
@@ -87,7 +84,6 @@ export function targetFromSnapshot(snapshot: PreviewCommentSnapshot): PreviewCom
     text: trimContextText(snapshot.text),
     position: normalizePosition(snapshot.position),
     htmlHint: trimHtmlHint(snapshot.htmlHint),
-    ...(slideIndex !== undefined ? { slideIndex } : {}),
     style: normalizeStyle(snapshot.style),
     selectionKind: snapshot.selectionKind === 'pod' ? 'pod' : 'element',
     memberCount:
@@ -120,13 +116,10 @@ export function overlayBoundsFromSnapshot(
 export function liveSnapshotForComment(
   comment: PreviewComment,
   snapshots: Map<string, PreviewCommentSnapshot>,
-  options: { targetsHydrated?: boolean } = {},
 ): PreviewCommentSnapshot | null {
   const snapshot = snapshots.get(comment.elementId);
   if (snapshot && snapshot.filePath === comment.filePath) return snapshot;
-  const slideIndex = normalizeSlideIndex(comment.slideIndex);
-  if (!comment.elementId.startsWith('pin-') && slideIndex === undefined) return null;
-  if (!comment.elementId.startsWith('pin-') && (options.targetsHydrated || snapshots.size > 0)) return null;
+  if (!comment.elementId.startsWith('pin-')) return null;
   return {
     filePath: comment.filePath,
     elementId: comment.elementId,
@@ -135,7 +128,6 @@ export function liveSnapshotForComment(
     text: trimContextText(comment.text),
     position: normalizePosition(comment.position),
     htmlHint: trimHtmlHint(comment.htmlHint),
-    ...(slideIndex !== undefined ? { slideIndex } : {}),
     style: normalizeStyle(comment.style),
     selectionKind: comment.selectionKind === 'pod' ? 'pod' : 'element',
     memberCount: comment.memberCount,
@@ -148,7 +140,6 @@ export function commentToAttachment(
   order: number,
 ): ChatCommentAttachment {
   const podMembers = normalizeMembers(comment.podMembers);
-  const slideIndex = normalizeSlideIndex(comment.slideIndex);
   return {
     id: comment.id,
     order,
@@ -160,7 +151,6 @@ export function commentToAttachment(
     currentText: trimContextText(comment.text),
     pagePosition: normalizePosition(comment.position),
     htmlHint: trimHtmlHint(comment.htmlHint),
-    ...(slideIndex !== undefined ? { slideIndex } : {}),
     style: normalizeStyle(comment.style),
     selectionKind: comment.selectionKind === 'pod' ? 'pod' : 'element',
     memberCount:
@@ -186,7 +176,6 @@ export function buildBoardCommentAttachments(input: {
 }): ChatCommentAttachment[] {
   const podMembers = normalizeMembers(input.target.podMembers);
   const selectionKind = input.target.selectionKind === 'pod' ? 'pod' : 'element';
-  const slideIndex = normalizeSlideIndex(input.target.slideIndex);
   const memberCount =
     selectionKind === 'pod'
       ? (podMembers.length > 0
@@ -209,7 +198,6 @@ export function buildBoardCommentAttachments(input: {
       currentText: trimContextText(input.target.text),
       pagePosition: normalizePosition(input.target.position),
       htmlHint: trimHtmlHint(input.target.htmlHint),
-      ...(slideIndex !== undefined ? { slideIndex } : {}),
       style: normalizeStyle(input.target.style),
       selectionKind,
       memberCount,
@@ -220,7 +208,6 @@ export function buildBoardCommentAttachments(input: {
 
 export function buildVisualAnnotationAttachment(input: VisualAnnotationAttachmentInput): ChatCommentAttachment {
   const target = input.target ?? null;
-  const slideIndex = normalizeSlideIndex(target?.slideIndex);
   const intent = visualAnnotationIntent(input.markKind);
   const visualId = sanitizeVisualAttachmentId(input.idSeed || input.screenshotPath || String(input.order));
   const elementId = target?.elementId?.trim() || `visual-mark-${visualId}`;
@@ -237,7 +224,6 @@ export function buildVisualAnnotationAttachment(input: VisualAnnotationAttachmen
     currentText: trimContextText(target?.text || ''),
     pagePosition: normalizePosition(target?.position ?? input.bounds),
     htmlHint: trimHtmlHint(target?.htmlHint || ''),
-    ...(slideIndex !== undefined ? { slideIndex } : {}),
     style: normalizeStyle(target?.style),
     selectionKind: 'visual',
     screenshotPath: input.screenshotPath,
@@ -326,7 +312,6 @@ function renderCommentAttachmentContext(commentAttachments: ChatCommentAttachmen
   ];
   commentAttachments.forEach((item) => {
     const position = normalizePosition(item.pagePosition);
-    const slideIndex = normalizeSlideIndex(item.slideIndex);
     const selectionKind =
       item.selectionKind === 'visual' ? 'visual' : item.selectionKind === 'pod' ? 'pod' : 'element';
     lines.push(
@@ -336,7 +321,6 @@ function renderCommentAttachmentContext(commentAttachments: ChatCommentAttachmen
       `file: ${item.filePath}`,
       `label: ${item.label || '(unlabeled)'}`,
       `position: x${position.x} y${position.y} ${position.width}x${position.height}`,
-      ...(slideIndex !== undefined ? [`slideIndex: ${slideIndex}`] : []),
       `currentText: ${trimContextText(item.currentText || '') || '(empty)'}`,
       `htmlHint: ${trimHtmlHint(item.htmlHint || '') || '(none)'}`,
       `computedStyle: ${formatAnnotationStyle(item.style) || '(none)'}`,
@@ -388,11 +372,6 @@ function normalizePosition(input: PreviewComment['position']): PreviewComment['p
 
 function finite(value: number | undefined): number {
   return Number.isFinite(value) ? Math.round(value as number) : 0;
-}
-
-function normalizeSlideIndex(value: unknown): number | undefined {
-  if (!Number.isFinite(value)) return undefined;
-  return Math.max(0, Math.round(value as number));
 }
 
 function normalizeMembers(input: PreviewCommentMember[] | undefined): PreviewCommentMember[] {

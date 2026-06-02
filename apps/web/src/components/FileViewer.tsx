@@ -2107,8 +2107,7 @@ export function CommentSidePanel({
   const selectedCount = visibleSelectedIds.size;
   const allSelected = comments.length > 0 && selectedCount === comments.length;
   const commentsLabel = t('chat.tabComments');
-  const busyOrBlocked = sending || sendDisabled;
-  const canCreateComment = Boolean(onCreateComment) && newCommentDraft.trim().length > 0 && !busyOrBlocked;
+  const canCreateComment = Boolean(onCreateComment) && newCommentDraft.trim().length > 0 && !sending && !sendDisabled;
   const submitNewComment = async () => {
     if (!onCreateComment || !newCommentDraft.trim()) return;
     const saved = await onCreateComment(newCommentDraft.trim());
@@ -2217,7 +2216,7 @@ export function CommentSidePanel({
             type="button"
             className="primary"
             data-testid="comment-side-send-claude"
-            disabled={busyOrBlocked}
+            disabled={sending || sendDisabled}
             onClick={() => void onSendSelected()}
           >
             {sending
@@ -2999,7 +2998,6 @@ export function applyInspectOverridesToSource(source: string, css: string): stri
 function CommentPreviewOverlays({
   comments,
   liveTargets,
-  liveTargetsHydrated,
   hoveredTarget,
   hoveredPodMemberId,
   activeTarget,
@@ -3013,7 +3011,6 @@ function CommentPreviewOverlays({
 }: {
   comments: PreviewComment[];
   liveTargets: Map<string, PreviewCommentSnapshot>;
-  liveTargetsHydrated: boolean;
   hoveredTarget: PreviewCommentSnapshot | null;
   hoveredPodMemberId: string | null;
   activeTarget: PreviewCommentSnapshot | null;
@@ -3030,7 +3027,7 @@ function CommentPreviewOverlays({
     .map((comment, index) => ({
       comment,
       index,
-      snapshot: liveSnapshotForComment(comment, liveTargets, { targetsHydrated: liveTargetsHydrated }),
+      snapshot: liveSnapshotForComment(comment, liveTargets),
     }))
     .filter((item): item is { comment: PreviewComment; index: number; snapshot: PreviewCommentSnapshot } =>
       Boolean(item.snapshot),
@@ -3490,61 +3487,6 @@ function clampBridgeCoordinate(value: unknown): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
   return Math.max(-MAX_BRIDGE_COORDINATE, Math.min(MAX_BRIDGE_COORDINATE, Math.round(numeric)));
-}
-
-function previewCommentVisibleOnSlide(
-  comment: PreviewComment,
-  isDeck: boolean,
-  slideState: SlideState | null,
-): boolean {
-  if (!isDeck) return true;
-  if (!Number.isFinite(comment.slideIndex)) return true;
-  const activeSlideIndex = slideState?.active ?? 0;
-  const commentSlideIndex = Math.max(0, Math.round(comment.slideIndex as number));
-  return commentSlideIndex === activeSlideIndex;
-}
-
-function previewCommentMatchesActiveSlide(
-  comment: PreviewComment,
-  isDeck: boolean,
-  slideState: SlideState | null,
-): boolean {
-  if (!isDeck) return true;
-  if (!Number.isFinite(comment.slideIndex)) return false;
-  const activeSlideIndex = slideState?.active ?? 0;
-  const commentSlideIndex = Math.max(0, Math.round(comment.slideIndex as number));
-  return commentSlideIndex === activeSlideIndex;
-}
-
-function previewCommentEditableFromTarget(
-  comment: PreviewComment,
-  isDeck: boolean,
-  slideState: SlideState | null,
-): boolean {
-  if (!isDeck) return true;
-  if (!Number.isFinite(comment.slideIndex)) return true;
-  return previewCommentMatchesActiveSlide(comment, isDeck, slideState);
-}
-
-function snapshotForCommentEdit(
-  comment: PreviewComment,
-  snapshot: PreviewCommentSnapshot,
-): PreviewCommentSnapshot {
-  if (Number.isFinite(comment.slideIndex)) return snapshot;
-  const { slideIndex: _slideIndex, ...unscopedSnapshot } = snapshot;
-  return unscopedSnapshot;
-}
-
-function snapshotForCommentTargetRefresh(
-  current: PreviewCommentSnapshot,
-  next: PreviewCommentSnapshot,
-  preserveUnscopedEdit: boolean,
-): PreviewCommentSnapshot {
-  if (current.elementId !== next.elementId) return next;
-  if (!preserveUnscopedEdit) return next;
-  if (Number.isFinite(current.slideIndex)) return next;
-  const { slideIndex: _slideIndex, ...unscopedSnapshot } = next;
-  return unscopedSnapshot;
 }
 
 // Shown instead of the React runtime when a .jsx/.tsx is a module loaded by a
@@ -4357,7 +4299,6 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
   useEffect(() => cancelHoverCardDismiss, [cancelHoverCardDismiss]);
   const [activePreviewCommentId, setActivePreviewCommentId] = useState<string | null>(null);
   const [liveCommentTargets, setLiveCommentTargets] = useState<Map<string, PreviewCommentSnapshot>>(() => new Map());
-  const [liveCommentTargetsHydrated, setLiveCommentTargetsHydrated] = useState(false);
   const liveCommentTargetsRef = useRef(liveCommentTargets);
   const [commentDraft, setCommentDraft] = useState('');
   // Inspect mode shares the iframe selection bridge with comment mode but
@@ -4594,9 +4535,6 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
     return /class\s*=\s*['"][^'"]*\bslide\b/i.test(source);
   }, [source]);
   const effectiveDeck = isDeck || looksLikeDeck;
-  const currentCommentSlideIndex = effectiveDeck
-    ? (slideState?.active ?? htmlPreviewSlideState.get(previewStateKey)?.active ?? 0)
-    : undefined;
   const livePreviewSource = inlinedSource ?? source;
   // Freeze the iframe input on the snapshot taken at Edit-mode entry. Any
   // source rewrite during edit (1.5s debounced set-style patches) stays
@@ -4992,7 +4930,6 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
   useEffect(() => {
     if (!inspectMode && !boardMode) {
       setLiveCommentTargets((current) => (current.size > 0 ? new Map() : current));
-      setLiveCommentTargetsHydrated(false);
       return;
     }
     function onMessage(ev: MessageEvent) {
@@ -5021,24 +4958,21 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
             height: clampBridgeCoordinate(item?.position?.height),
           },
           htmlHint: String(item?.htmlHint || ''),
-          ...(currentCommentSlideIndex !== undefined ? { slideIndex: currentCommentSlideIndex } : {}),
           style: normalizeAnnotationStyle(item?.style),
           selectionKind: 'element',
           memberCount: undefined,
         });
       });
       setLiveCommentTargets(next);
-      setLiveCommentTargetsHydrated(true);
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [currentCommentSlideIndex, inspectMode, boardMode, file.name, isOurPreviewIframeSource]);
+  }, [inspectMode, boardMode, file.name, isOurPreviewIframeSource]);
 
   useEffect(() => {
     setActiveCommentTarget(null);
     setHoveredCommentTarget(null);
     setLiveCommentTargets(new Map());
-    setLiveCommentTargetsHydrated(false);
     setCommentDraft('');
     setActiveInspectTarget(null);
     setInspectOverrides({});
@@ -5109,7 +5043,6 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
       setHoveredCommentTarget((current) => (current ? null : current));
       setActivePreviewCommentId((current) => (current ? null : current));
       setLiveCommentTargets((current) => (current.size > 0 ? new Map() : current));
-      setLiveCommentTargetsHydrated(false);
       setQueuedBoardNotes((current) => (current.length > 0 ? [] : current));
       setStrokePoints((current) => (current.length > 0 ? [] : current));
       return;
@@ -5133,17 +5066,11 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
           }
         : undefined,
       htmlHint: String(data.htmlHint || ''),
-      ...(currentCommentSlideIndex !== undefined ? { slideIndex: currentCommentSlideIndex } : {}),
       style: normalizeAnnotationStyle(data.style),
       selectionKind: data.selectionKind === 'pod' ? 'pod' : 'element',
       memberCount: finiteBridgeInteger(data.memberCount),
       podMembers: Array.isArray(data.podMembers) ? data.podMembers : undefined,
     });
-    const preserveUnscopedCommentEdit = activePreviewCommentId
-      ? previewComments.some((comment) => (
-          comment.id === activePreviewCommentId && !Number.isFinite(comment.slideIndex)
-        ))
-      : false;
     function onMessage(ev: MessageEvent) {
       if (!isOurPreviewIframeSource(ev.source)) return;
       const data = ev.data as (Partial<PreviewCommentSnapshot> & {
@@ -5159,21 +5086,20 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
           if (snapshot.elementId) next.set(snapshot.elementId, snapshot);
         });
         setLiveCommentTargets(next);
-        setLiveCommentTargetsHydrated(true);
-        setActiveCommentTarget((current) => {
-          if (!current || current.selectionKind === 'pod') return current;
-          const refreshed = next.get(current.elementId);
-          return refreshed
-            ? snapshotForCommentTargetRefresh(current, refreshed, preserveUnscopedCommentEdit)
-            : current;
-        });
-        setHoveredCommentTarget((current) => {
-          if (!current || current.selectionKind === 'pod') return current;
-          const refreshed = next.get(current.elementId);
-          return refreshed
-            ? snapshotForCommentTargetRefresh(current, refreshed, preserveUnscopedCommentEdit)
-            : null;
-        });
+        setActiveCommentTarget((current) => (
+          current
+            ? current.selectionKind === 'pod'
+              ? current
+              : next.get(current.elementId) ?? current
+            : null
+        ));
+        setHoveredCommentTarget((current) => (
+          current
+            ? current.selectionKind === 'pod'
+              ? current
+              : next.get(current.elementId) ?? null
+            : null
+        ));
         return;
       }
       if (data.type === 'od:comment-active-target-update') {
@@ -5181,14 +5107,10 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
         if (!snapshot.elementId) return;
         setLiveCommentTargets((current) => new Map(current).set(snapshot.elementId, snapshot));
         setActiveCommentTarget((current) => (
-          current && current.elementId === snapshot.elementId
-            ? snapshotForCommentTargetRefresh(current, snapshot, preserveUnscopedCommentEdit)
-            : current
+          current && current.elementId === snapshot.elementId ? snapshot : current
         ));
         setHoveredCommentTarget((current) => (
-          current && current.elementId === snapshot.elementId
-            ? snapshotForCommentTargetRefresh(current, snapshot, preserveUnscopedCommentEdit)
-            : current
+          current && current.elementId === snapshot.elementId ? snapshot : current
         ));
         return;
       }
@@ -5216,23 +5138,14 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
       if (data.type === 'od:comment-target') {
         const snapshot = snapshotFromData(data);
         if (!snapshot.elementId) return;
-        const existing = commentCreateMode
-          ? previewComments.find((comment) =>
-              comment.filePath === file.name &&
-              comment.status === 'open' &&
-              previewCommentEditableFromTarget(comment, effectiveDeck, slideState) &&
-              comment.elementId === snapshot.elementId,
-            )
-          : undefined;
         const shouldOpenComposer = boardMode || commentCreateMode;
-        const activeTarget = existing ? snapshotForCommentEdit(existing, snapshot) : snapshot;
         cancelHoverCardDismiss();
-        setActiveCommentTarget((current) => (shouldOpenComposer ? activeTarget : current));
+        setActiveCommentTarget((current) => (shouldOpenComposer ? snapshot : current));
         setHoveredCommentTarget(snapshot);
         setLiveCommentTargets((current) => new Map(current).set(snapshot.elementId, snapshot));
         if (shouldOpenComposer) {
-          setActivePreviewCommentId(existing?.id ?? null);
-          setCommentDraft(existing?.note ?? '');
+          setActivePreviewCommentId(null);
+          setCommentDraft('');
           setQueuedBoardNotes([]);
         }
         return;
@@ -5265,11 +5178,8 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
           setStrokePoints([]);
           return;
         }
-        const deckScopedTarget = currentCommentSlideIndex !== undefined
-          ? { ...nextTarget, slideIndex: currentCommentSlideIndex }
-          : nextTarget;
-        setActiveCommentTarget(deckScopedTarget);
-        setHoveredCommentTarget(deckScopedTarget);
+        setActiveCommentTarget(nextTarget);
+        setHoveredCommentTarget(nextTarget);
         setActivePreviewCommentId(null);
         setQueuedBoardNotes([]);
         setCommentDraft('');
@@ -5278,22 +5188,7 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [
-    activeCommentTarget,
-    activePreviewCommentId,
-    boardMode,
-    boardTool,
-    cancelHoverCardDismiss,
-    commentPortalHost,
-    commentCreateMode,
-    currentCommentSlideIndex,
-    effectiveDeck,
-    file.name,
-    isOurPreviewIframeSource,
-    previewComments,
-    scheduleHoverCardDismiss,
-    slideState,
-  ]);
+  }, [activeCommentTarget, boardMode, boardTool, cancelHoverCardDismiss, commentPortalHost, file.name, isOurPreviewIframeSource, previewComments, scheduleHoverCardDismiss]);
 
   useEffect(() => {
     if (!boardMode || !activeCommentTarget || activeCommentTarget.selectionKind === 'pod') return;
@@ -6181,13 +6076,6 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
     setStrokePoints([]);
   }
 
-  useEffect(() => {
-    if (!effectiveDeck) return;
-    clearBoardComposer();
-    setLiveCommentTargets(new Map());
-    setLiveCommentTargetsHydrated(false);
-  }, [currentCommentSlideIndex, effectiveDeck]);
-
   function closeArtifactToolMenus() {
     setAgentToolsOpen(false);
   }
@@ -6365,7 +6253,6 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
           text: '',
           position: { x: 0, y: 0, width: 0, height: 0 },
           htmlHint: '',
-          ...(currentCommentSlideIndex !== undefined ? { slideIndex: currentCommentSlideIndex } : {}),
           selectionKind: 'element',
         };
     setSendingBoardBatch(true);
@@ -6404,13 +6291,9 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
   };
   const visibleSideComments = useMemo(
     () => previewComments
-      .filter((comment) =>
-        comment.filePath === file.name &&
-        comment.status === 'open' &&
-        previewCommentVisibleOnSlide(comment, effectiveDeck, slideState)
-      )
+      .filter((comment) => comment.filePath === file.name && comment.status === 'open')
       .sort((a, b) => commentActivityAt(b) - commentActivityAt(a)),
-    [effectiveDeck, file.name, previewComments, slideState],
+    [file.name, previewComments],
   );
   const activeSideCommentId = activePreviewCommentId;
   const activeCommentTargetVisible = commentTargetIntersectsPreview(
@@ -6668,15 +6551,13 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
           text: comment.text,
           position: comment.position,
           htmlHint: comment.htmlHint,
-          ...(Number.isFinite(comment.slideIndex) ? { slideIndex: comment.slideIndex } : {}),
           style: comment.style,
           selectionKind: comment.selectionKind ?? 'element',
           memberCount: comment.memberCount,
           podMembers: comment.podMembers,
         };
-        const editSnapshot = snapshotForCommentEdit(comment, snapshot);
-        setActiveCommentTarget(editSnapshot);
-        setHoveredCommentTarget(editSnapshot);
+        setActiveCommentTarget(snapshot);
+        setHoveredCommentTarget(snapshot);
         setActivePreviewCommentId(comment.id);
         setCommentDraft(comment.note);
         setQueuedBoardNotes([]);
@@ -7309,7 +7190,6 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
               <CommentPreviewOverlays
                 comments={commentCreateMode ? visibleSideComments : []}
                 liveTargets={liveCommentTargets}
-                liveTargetsHydrated={liveCommentTargetsHydrated}
                 hoveredTarget={hoveredCommentTarget}
                 hoveredPodMemberId={hoveredPodMemberId}
                 activeTarget={activeCommentTarget}
@@ -7320,13 +7200,12 @@ const [manualEditTargets, setManualEditTargets] = useState<ManualEditTarget[]>([
                 offsetY={overlayPreviewTransform.offsetY}
                 strokePoints={strokePoints}
                 onOpenComment={(comment, snapshot) => {
-                  const editSnapshot = snapshotForCommentEdit(comment, snapshot);
                   setCommentPanelOpen(true);
                   setCommentSidePanelCollapsed(false);
                   setCommentCreateMode(true);
                   setBoardMode(true);
-                  setActiveCommentTarget(editSnapshot);
-                  setHoveredCommentTarget(editSnapshot);
+                  setActiveCommentTarget(snapshot);
+                  setHoveredCommentTarget(snapshot);
                   setActivePreviewCommentId(comment.id);
                   setCommentDraft(comment.note);
                   setQueuedBoardNotes([]);
