@@ -100,6 +100,63 @@ describe('same-run retry runtime', () => {
       retry_result: 'success',
     });
   });
+
+  it('retries a silent first-token stall caught by the inactivity watchdog', async () => {
+    binDir = await mkdtemp(path.join(os.tmpdir(), 'od-run-retry-stall-bin-'));
+    const fakeClaude = await writeStallingClaude(binDir, 'claude-stall');
+
+    delete process.env.POSTHOG_KEY;
+    delete process.env.POSTHOG_HOST;
+    delete process.env.LANGFUSE_PUBLIC_KEY;
+    delete process.env.LANGFUSE_SECRET_KEY;
+    delete process.env.LANGFUSE_BASE_URL;
+    delete process.env.OPEN_DESIGN_TELEMETRY_RELAY_URL;
+    // Trip the no-output inactivity watchdog quickly so the first (silent)
+    // attempt stalls at first_token_wait and the same-run retry can fire. Kept
+    // comfortably above node cold-start so the recovered retry attempt's own
+    // watchdog does not also trip before it emits its first token.
+    process.env.OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS = '400';
+
+    started = await startServer({ port: 0, returnServer: true }) as StartedServer;
+    await putConfig(started.url, {
+      agentId: 'claude',
+      agentCliEnv: { claude: { CLAUDE_BIN: fakeClaude } },
+      telemetry: { metrics: true, content: false, artifactManifest: false },
+      privacyDecisionAt: Date.now(),
+    });
+
+    const run = await createAndWaitForRun(started.url);
+    expect(run.status).toBe('succeeded');
+    expect(run.id).toBeTruthy();
+
+    const events = await readRunEvents(run.eventsLogPath);
+    // Two spawns (silent stall + recovered retry), one terminal end.
+    expect(events.filter((event) => event.event === 'start')).toHaveLength(2);
+    expect(events.filter((event) => event.event === 'end')).toHaveLength(1);
+
+    const retryAttempted = events.filter((event) => event.event === 'run_retry_attempted');
+    expect(retryAttempted).toHaveLength(1);
+    expect(retryAttempted[0]?.data).toMatchObject({
+      run_id: run.id,
+      retry_of_run_id: run.id,
+      retry_attempt_index: 1,
+      retry_max_attempts: 1,
+      retry_strategy: 'same_run_transient',
+      retry_reason: 'transient_failure',
+      failure_category: 'timeout',
+      failure_detail: 'inactivity_timeout',
+      failure_stage: 'first_token_wait',
+    });
+
+    const retryFinished = events.filter((event) => event.event === 'run_retry_finished');
+    expect(retryFinished).toHaveLength(1);
+    expect(retryFinished[0]?.data).toMatchObject({
+      run_id: run.id,
+      retry_of_run_id: run.id,
+      retry_attempt_index: 1,
+      retry_result: 'success',
+    });
+  });
 });
 
 function snapshotEnv(): Record<string, string | undefined> {
@@ -110,6 +167,7 @@ function snapshotEnv(): Record<string, string | undefined> {
     OPEN_DESIGN_TELEMETRY_RELAY_URL: process.env.OPEN_DESIGN_TELEMETRY_RELAY_URL,
     POSTHOG_KEY: process.env.POSTHOG_KEY,
     POSTHOG_HOST: process.env.POSTHOG_HOST,
+    OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS: process.env.OD_CHAT_RUN_INACTIVITY_TIMEOUT_MS,
   };
 }
 
@@ -147,6 +205,46 @@ if (attempts === 0) {
     message: {
       id: 'msg-retry-success',
       content: [{ type: 'text', text: 'Recovered after retry.' }],
+      stop_reason: 'end_turn'
+    }
+  }));
+  setTimeout(() => process.exit(0), 20);
+}
+`, 'utf8');
+  await chmod(bin, 0o755);
+  return bin;
+}
+
+async function writeStallingClaude(dir: string, name: string): Promise<string> {
+  const bin = path.join(dir, name);
+  const counterPath = path.join(dir, `${name}-attempts`);
+  await writeFile(bin, `#!/usr/bin/env node
+const fs = require('node:fs');
+const counterPath = ${JSON.stringify(counterPath)};
+if (process.argv.includes('--version')) {
+  console.log('claude-code 1.0.0-retry-stall');
+  process.exit(0);
+}
+if (process.argv.includes('--help')) {
+  console.log('Usage: claude -p [--include-partial-messages] [--add-dir DIR]');
+  process.exit(0);
+}
+let attempts = 0;
+try { attempts = Number(fs.readFileSync(counterPath, 'utf8')) || 0; } catch {}
+fs.writeFileSync(counterPath, String(attempts + 1));
+if (attempts === 0) {
+  // First attempt: emit nothing on stdout/stderr and hang well past the
+  // inactivity watchdog window so the daemon classifies a silent first-token
+  // stall. Exit cleanly when the watchdog SIGTERMs us (default Node behavior),
+  // and keep a long fallback timer so we never self-exit before the watchdog.
+  setTimeout(() => process.exit(0), 60000);
+} else {
+  console.log(JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-retry-test' }));
+  console.log(JSON.stringify({
+    type: 'assistant',
+    message: {
+      id: 'msg-retry-stall-success',
+      content: [{ type: 'text', text: 'Recovered after watchdog retry.' }],
       stop_reason: 'end_turn'
     }
   }));

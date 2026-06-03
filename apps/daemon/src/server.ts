@@ -11275,7 +11275,14 @@ export async function startServer({
           'error',
           createSseErrorPayload('AGENT_EXECUTION_FAILED', message),
         );
-        design.runs.finish(run, 'failed', 1, null);
+        // Route the retried-start failure through the same finalizer as child
+        // close/error so it emits terminal retry telemetry (run_retry_finished
+        // with retry_result: 'failed') and sets run.retryFinalResult, instead
+        // of finishing directly and leaving run_finished to report the fallback
+        // retry_final_result: 'not_attempted'. retryAttemptCount is already 1
+        // here, so decideSafeRunRetry suppresses with attempt_limit_reached and
+        // cannot trigger another restart loop.
+        finishWithRetryDecision('failed', 1, null);
       });
     };
     const finalizeRetryTelemetry = (status, decision, failure, errorCode) => {
@@ -11354,10 +11361,11 @@ export async function startServer({
           retry_reason: decision.retryReason,
         });
         restartSameRunAfterRetry();
-        return;
+        return true;
       }
       finalizeRetryTelemetry(status, decision, failure, errorCode);
       design.runs.finish(run, status, code, signal);
+      return false;
     };
     const mcpServers = buildLiveArtifactsMcpServersForAgent(def, {
       enabled: Boolean(toolTokenGrant?.token),
@@ -11771,6 +11779,14 @@ export async function startServer({
     // they just terminated the process. Set strictly inside
     // `failForInactivity`'s quiet-period branch.
     let artifactQuietShutdownRequested = false;
+    // Set when the no-output inactivity watchdog routed this attempt through
+    // the same-run retry finalizer AND that finalizer restarted the run on a
+    // fresh child. The stalled child is then SIGTERM'd, so its later `close`
+    // must NOT finalize the run a second time or unregister the new attempt's
+    // event sink / run handle (both keyed by the shared runId). The close
+    // handler bails early when this is true, revoking only this attempt's own
+    // tool token.
+    let watchdogRetryRestarted = false;
     const summarizeAgentEventForInactivity = (payload) => {
       const type = payload?.type ? String(payload.type) : 'unknown';
       if (type === 'tool_result') {
@@ -11862,7 +11878,17 @@ export async function startServer({
         stallPayload = createSseErrorPayload('AGENT_EXECUTION_FAILED', message, { retryable: true });
       }
       send('error', stallPayload);
-      design.runs.finish(run, 'failed', 1, null);
+      // A silent first-token hang is one of the safe transient failure shapes
+      // this run is allowed to recover: classifyRunFailure maps the stall text
+      // to a retryable `timeout` at `first_token_wait`, and decideSafeRunRetry
+      // permits the same-run retry when no output/tools/artifacts were seen.
+      // Route through the shared finalizer (after surfacing stallPayload) so
+      // the watchdog path gets the same run_retry_attempted/run_retry_finished
+      // telemetry as child close/error — not a bare terminal failure.
+      const retried = finishWithRetryDecision('failed', 1, null);
+      if (retried) {
+        watchdogRetryRestarted = true;
+      }
       if (acpSession?.abort) {
         acpSession.abort();
       }
@@ -12748,6 +12774,17 @@ export async function startServer({
     child.on('close', async (code, signal) => {
       try {
       clearInactivityWatchdog();
+      if (watchdogRetryRestarted) {
+        // The inactivity watchdog already failed this attempt and the same-run
+        // retry restarted on a fresh child. Finalization and event-sink / run-
+        // handle ownership (keyed by the shared runId) now belong to the new
+        // attempt, so this stalled child's close must not re-run them — doing
+        // so would re-finalize the run and delete the new attempt's sink.
+        // Revoke only THIS attempt's tool token (idempotent, keyed by its own
+        // token string) and bail; the `finally` block still cleans up logs.
+        revokeToolToken('child_exit');
+        return;
+      }
       revokeToolToken('child_exit');
       unregisterChatAgentEventSink();
       if (acpSession?.hasFatalError()) {
