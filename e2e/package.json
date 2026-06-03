@@ -9,6 +9,7 @@
     "test:p0p1": "vitest run -c vitest.config.ts tests specs -t '\\[P[01]\\]'",
     "test:p1": "vitest run -c vitest.config.ts tests specs -t '\\[P1\\]'",
     "test:p2": "vitest run -c vitest.config.ts tests specs -t '\\[P2\\]'",
+    "test:ui": "playwright test -c playwright.config.ts ui",
     "test:ui:p0": "playwright test -c playwright.config.ts ui --grep '\\[P0\\]'",
     "test:ui:p0p1": "playwright test -c playwright.config.ts ui --grep '\\[P[01]\\]'",
     "test:ui:p1": "playwright test -c playwright.config.ts ui --grep '\\[P1\\]'",

@@ -478,6 +478,7 @@ const e2eAllowedScripts = [
   "test:p0p1",
   "test:p1",
   "test:p2",
+  "test:ui",
   "test:ui:critical",
   "test:ui:extended",
   "test:ui:p0",
