@@ -111,13 +111,18 @@ const PLATFORM_ICON: Record<'macOS' | 'Windows' | 'Linux', string> = {
 const ICON_DOWNLOAD =
   '↓';
 
+// Absolute URL for the current locale, so breadcrumb structured data matches
+// the route actually being indexed (e.g. /ja/download/ on the Japanese page,
+// not the canonical English URL on every localized variant).
+const absUrl = (path: string) => new URL(href(path), SITE).toString();
+
 const jsonLd = [
   {
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
     itemListElement: [
-      { '@type': 'ListItem', position: 1, name: 'Open Design', item: SITE },
-      { '@type': 'ListItem', position: 2, name: page.breadcrumb, item: `${SITE}download/` },
+      { '@type': 'ListItem', position: 1, name: 'Open Design', item: absUrl('/') },
+      { '@type': 'ListItem', position: 2, name: page.breadcrumb, item: absUrl('/download/') },
     ],
   },
   {
