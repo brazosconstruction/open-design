@@ -12,7 +12,7 @@
 
 只对以下情况发送飞书告警：
 
-- workflow：主 CI，例如 `.github/workflows/ci.yml`
+- workflow：主 CI，名称为 `ci`（定义在 `.github/workflows/ci.yml`）
 - event：`push`
 - branch：`main`
 - conclusion：`failure`

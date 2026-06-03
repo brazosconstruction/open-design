@@ -3,7 +3,7 @@ name: Notify main CI failure
 on:
   workflow_run:
     workflows:
-      - CI
+      - ci
     types:
       - completed
 
