@@ -55,6 +55,7 @@ export const ru: Dict = {
   'common.cancel': 'Отмена',
   'common.save': 'Сохранить',
   'common.close': 'Закрыть',
+  'common.clear': 'Очистить',
   'common.delete': 'Удалить',
   'common.rename': 'Переименовать',
   'common.edit': 'Редактировать',

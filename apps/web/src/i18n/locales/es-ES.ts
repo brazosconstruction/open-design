@@ -55,6 +55,7 @@ export const esES: Dict = {
   'common.cancel': 'Cancelar',
   'common.save': 'Guardar',
   'common.close': 'Cerrar',
+  'common.clear': 'Limpiar',
   'common.delete': 'Eliminar',
   'common.rename': 'Renombrar',
   'common.edit': 'Editar',

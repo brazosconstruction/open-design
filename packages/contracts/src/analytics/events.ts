@@ -1324,6 +1324,7 @@ export interface ChatPanelClickProps {
     | 'composer_settings'
     | 'attachment'
     | 'send'
+    | 'mention_popover_trigger'
     | 'resources_popover_trigger';
 }
 

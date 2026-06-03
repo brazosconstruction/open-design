@@ -55,6 +55,7 @@ export const ptBR: Dict = {
   'common.cancel': 'Cancelar',
   'common.save': 'Salvar',
   'common.close': 'Fechar',
+  'common.clear': 'Limpar',
   'common.delete': 'Excluir',
   'common.rename': 'Renomear',
   'common.edit': 'Editar',

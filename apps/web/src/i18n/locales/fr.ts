@@ -25,6 +25,7 @@ export const fr: Dict = {
   'common.cancel': 'Annuler',
   'common.save': 'Enregistrer',
   'common.close': 'Fermer',
+  'common.clear': 'Effacer',
   'common.delete': 'Supprimer',
   'common.rename': 'Renommer',
   'common.edit': 'Modifier',

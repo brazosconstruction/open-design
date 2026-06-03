@@ -55,6 +55,7 @@ export const it: Dict = {
   'common.cancel': 'Annulla',
   'common.save': 'Salva',
   'common.close': 'Chiudi',
+  'common.clear': 'Cancella',
   'common.delete': 'Elimina',
   'common.rename': 'Rinomina',
   'common.edit': 'Modifica',

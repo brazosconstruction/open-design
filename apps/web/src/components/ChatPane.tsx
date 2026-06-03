@@ -1102,7 +1102,7 @@ export function ChatPane({
                     type="button"
                     className="chat-history-search-clear"
                     onClick={() => setConversationSearch('')}
-                    aria-label={t('common.clear')}
+                    aria-label="Clear search"
                   >
                     <Icon name="close" size={10} />
                   </button>

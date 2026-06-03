@@ -55,6 +55,7 @@ export const tr: Dict = {
   'common.cancel': 'İptal et',
   'common.save': 'Kaydet',
   'common.close': 'Kapat',
+  'common.clear': 'Temizle',
   'common.delete': 'Sil',
   'common.rename': 'Yeniden adlandır',
   'common.edit': 'Düzenle',

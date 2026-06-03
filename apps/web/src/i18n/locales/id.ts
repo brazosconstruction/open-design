@@ -55,6 +55,7 @@ export const id: Dict = {
   'common.cancel': 'Batal',
   'common.save': 'Simpan',
   'common.close': 'Tutup',
+  'common.clear': 'Bersihkan',
   'common.delete': 'Hapus',
   'common.rename': 'Ganti nama',
   'common.edit': 'Edit',

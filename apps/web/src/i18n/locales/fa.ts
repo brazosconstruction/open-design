@@ -55,6 +55,7 @@ export const fa: Dict = {
   'common.cancel': 'لغو',
   'common.save': 'ذخیره',
   'common.close': 'بستن',
+  'common.clear': 'پاک کردن',
   'common.delete': 'حذف',
   'common.rename': 'تغییر نام',
   'common.edit': 'ویرایش',

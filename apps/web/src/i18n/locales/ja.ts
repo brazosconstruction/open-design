@@ -55,6 +55,7 @@ export const ja: Dict = {
   'common.cancel': 'キャンセル',
   'common.save': '保存',
   'common.close': '閉じる',
+  'common.clear': 'クリア',
   'common.delete': '削除',
   'common.rename': '名前を変更',
   'common.edit': '編集',

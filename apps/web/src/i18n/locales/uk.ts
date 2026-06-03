@@ -55,6 +55,7 @@ export const uk: Dict = {
   'common.cancel': 'Скасувати',
   'common.save': 'Зберегти',
   'common.close': 'Закрити',
+  'common.clear': 'Очистити',
   'common.delete': 'Видалити',
   'common.rename': 'Перейменувати',
   'common.edit': 'Редагувати',

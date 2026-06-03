@@ -746,33 +746,39 @@
 
 /* Project page audit pass: one final rule set for the active project shell.
    Keep the outer panes flat; only controls and repeated items get radius. */
+.workspace-shell {
+  grid-template-rows: 34px minmax(0, 1fr);
+}
 .workspace-shell .workspace-tabs-chrome.app-chrome-header {
-  --workspace-tabs-chrome-height: 36px;
+  --workspace-tabs-chrome-height: 34px;
   --workspace-tab-bar-bg: color-mix(in srgb, var(--bg-panel) 82%, var(--bg-subtle));
-  --workspace-active-tab-border: color-mix(in srgb, var(--border-strong) 42%, transparent);
-  height: 36px;
-  min-height: 36px;
-  padding: 0 10px 0 6px;
+  --workspace-active-tab-border: color-mix(in srgb, var(--border-strong) 38%, transparent);
+  height: 34px;
+  min-height: 34px;
+  padding: 0 8px 0 0;
   background: var(--workspace-tab-bar-bg);
   border-bottom: 0;
   box-shadow: none;
 }
+.workspace-shell .workspace-tabs-traffic {
+  align-self: stretch;
+}
 .workspace-shell .workspace-tabs-strip {
-  gap: 4px;
-  align-items: flex-end;
-  padding-top: 3px;
+  gap: 3px;
+  align-items: center;
+  padding-top: 0;
 }
 .workspace-shell .workspace-tab {
-  height: 32px;
-  min-height: 32px;
-  min-width: 96px;
+  width: 156px;
+  height: 26px;
+  min-height: 26px;
+  min-width: 112px;
   max-width: 168px;
-  flex: 1 1 148px;
-  grid-template-columns: minmax(0, 1fr) 24px;
-  align-self: flex-end;
-  border-radius: 10px 10px 0 0;
+  flex: 0 0 156px;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-self: center;
+  border-radius: 7px;
   border: 1px solid transparent;
-  border-bottom: 0;
   background: transparent;
   box-shadow: none;
 }
@@ -780,17 +786,16 @@
   display: none;
 }
 .workspace-shell .workspace-tab.is-active {
-  background: var(--bg-panel);
+  background: color-mix(in srgb, var(--bg-panel) 94%, var(--bg-subtle));
   border-color: var(--workspace-active-tab-border);
-  border-bottom-color: transparent;
   box-shadow:
-    0 1px 0 var(--bg-panel),
-    0 -1px 0 color-mix(in srgb, var(--bg-panel) 86%, transparent) inset;
+    0 1px 2px color-mix(in srgb, var(--text) 6%, transparent),
+    0 0 0 0.5px color-mix(in srgb, var(--bg-panel) 82%, transparent) inset;
   z-index: 2;
 }
 .workspace-shell .workspace-tab:not(.is-active):hover,
 .workspace-shell .workspace-tab:not(.is-active):focus-within {
-  border-radius: 10px;
+  border-radius: 7px;
   background:
     linear-gradient(
       color-mix(in srgb, var(--bg-panel) 78%, transparent),
@@ -810,15 +815,15 @@
 .workspace-shell .workspace-tab__main {
   position: relative;
   z-index: 2;
-  gap: 6px;
-  padding-inline: 10px 4px;
+  gap: 5px;
+  padding-inline: 9px 3px;
 }
 .workspace-shell .workspace-tab__close {
   position: relative;
   z-index: 2;
 }
 .workspace-shell .workspace-tab__label {
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 540;
 }
 .workspace-shell .workspace-tab__close {
@@ -1150,19 +1155,21 @@
 }
 
 .app .composer {
-  padding: 8px 10px 10px;
+  padding: 9px 10px 11px;
   background: transparent;
 }
 .app .composer-shell {
-  padding: 8px;
+  padding: 7px;
   border-color: color-mix(in srgb, var(--border) 84%, var(--border-strong));
   border-radius: 10px;
   background: color-mix(in srgb, var(--bg-panel) 96%, var(--bg-subtle));
   box-shadow: var(--shadow-sm);
 }
 .app .composer-shell:focus-within {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-sm), 0 0 0 3px var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border-strong));
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--text) 6%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 6%, transparent);
 }
 .app .composer.drag-active .composer-shell {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
@@ -1176,22 +1183,25 @@
      only set the textarea, drifting the overlay glyphs off the caret. */
 }
 .app .composer-row {
-  min-height: 32px;
-  padding-top: 2px;
+  min-height: 30px;
+  padding-top: 6px;
+  margin-top: 1px;
+  gap: 6px;
 }
 .app .composer-row .icon-btn,
 .app .composer-import,
 .app .composer-research,
 .app .composer-send {
-  border-radius: 9px;
+  border-radius: 7px;
 }
 .app .composer-row .icon-btn {
   width: 28px;
   height: 28px;
 }
 .app .composer-send {
-  height: 30px;
-  min-height: 30px;
+  height: 28px;
+  min-height: 28px;
+  min-width: 58px;
   padding: 0 12px;
   font-size: 12.5px;
   font-weight: 600;

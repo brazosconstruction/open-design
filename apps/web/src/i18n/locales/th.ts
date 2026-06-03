@@ -55,6 +55,7 @@ export const th: Dict = {
   'common.cancel': 'ยกเลิก',
   'common.save': 'บันทึก',
   'common.close': 'ปิด',
+  'common.clear': 'ล้าง',
   'common.delete': 'ลบ',
   'common.rename': 'เปลี่ยนชื่อ',
   'common.edit': 'แก้ไข',

@@ -55,6 +55,7 @@ export const pl: Dict = {
   'common.cancel': 'Anuluj',
   'common.save': 'Zapisz',
   'common.close': 'Zamknij',
+  'common.clear': 'Wyczyść',
   'common.delete': 'Usuń',
   'common.rename': 'Zmień nazwę',
   'common.edit': 'Edytuj',

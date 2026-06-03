@@ -55,6 +55,7 @@ export const ko: Dict = {
   'common.cancel': '취소',
   'common.save': '저장',
   'common.close': '닫기',
+  'common.clear': '지우기',
   'common.delete': '삭제',
   'common.rename': '이름 변경',
   'common.edit': '편집',

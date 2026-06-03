@@ -55,6 +55,7 @@ export const hu: Dict = {
   'common.cancel': 'Mégse',
   'common.save': 'Mentés',
   'common.close': 'Bezárás',
+  'common.clear': 'Törlés',
   'common.delete': 'Törlés',
   'common.rename': 'Átnevezés',
   'common.edit': 'Szerkesztés',

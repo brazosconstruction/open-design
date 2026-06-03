@@ -55,6 +55,7 @@ export const ar: Dict = {
   'common.cancel': 'إلغاء',
   'common.save': 'حفظ',
   'common.close': 'إغلاق',
+  'common.clear': 'مسح',
   'common.delete': 'حذف',
   'common.rename': 'إعادة تسمية',
   'common.edit': 'تعديل',
