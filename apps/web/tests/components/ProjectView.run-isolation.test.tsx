@@ -95,6 +95,8 @@ vi.mock('../../src/state/projects', () => ({
   patchProject: (...args: unknown[]) => patchProject(...args),
   saveMessage: (...args: unknown[]) => saveMessage(...args),
   saveTabs: (...args: unknown[]) => saveTabs(...args),
+  cacheTabsLocally: (_projectId: string, state: unknown) => state,
+  persistTabsToDaemonNow: vi.fn(),
 }));
 
 vi.mock('../../src/components/AppChromeHeader', () => ({

@@ -395,7 +395,7 @@ function historyWithWorkspaceContext(
 }
 
 function commentTaskQuery(attachment: ChatCommentAttachment): string {
-  return attachment.comment.trim();
+  return (attachment.comment ?? '').trim();
 }
 
 function commentTaskContextAttachment(attachment: ChatCommentAttachment): ChatCommentAttachment {

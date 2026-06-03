@@ -34,6 +34,69 @@ const GSAP_SKILL = {
   upstream: 'https://github.com/greensock/gsap-skills',
 };
 
+const CREATIVE_DIRECTOR_SKILL = {
+  ...DESIGN_TASTE_SKILL,
+  id: 'creative-director',
+  name: 'creative-director',
+  description: 'Directs the end-to-end design workflow.',
+  triggers: ['creative director', 'design workflow'],
+  category: 'creative-direction',
+  upstream: 'https://github.com/smixs/creative-director-skill',
+};
+
+const SPREADSHEET_SKILL = {
+  ...DESIGN_TASTE_SKILL,
+  id: 'spreadsheet-ops',
+  name: 'spreadsheet-ops',
+  description: 'Analyze spreadsheet data before design decisions.',
+  triggers: ['csv', 'data proof', 'spreadsheet'],
+  category: 'documents',
+  upstream: 'https://example.test/spreadsheet-ops',
+};
+
+const RESEARCH_PLUGIN = {
+  id: 'research-assets',
+  title: 'Research Asset Plugin',
+  version: '1.0.0',
+  sourceKind: 'bundled',
+  source: 'official',
+  trust: 'official',
+  capabilitiesGranted: [],
+  manifest: {
+    name: 'research-assets',
+    title: 'Research Asset Plugin',
+    version: '1.0.0',
+    description: 'Pulls proof points and market references into design work.',
+    tags: ['research', 'proof', 'design'],
+    od: { kind: 'scenario', mode: 'research' },
+  },
+  fsPath: '/tmp/research-assets',
+  installedAt: 0,
+  updatedAt: 0,
+};
+
+const HIGGSFIELD_MCP = {
+  id: 'higgsfield',
+  label: 'Higgsfield Video MCP',
+  transport: 'http',
+  enabled: true,
+  url: 'https://mcp.higgsfield.ai/mcp',
+};
+
+const FIGMA_CONNECTOR = {
+  id: 'figma',
+  name: 'Figma',
+  provider: 'composio',
+  category: 'design',
+  description: 'Reads Figma files and design references.',
+  status: 'connected',
+  accountLabel: 'Design Team',
+  tools: [],
+  allowedToolNames: ['FIGMA_GET_FILE'],
+  curatedToolNames: ['FIGMA_GET_FILE'],
+  toolCount: 1,
+};
+
 let fetchMock: ReturnType<typeof vi.fn>;
 
 function renderComposer(
@@ -51,6 +114,15 @@ function renderComposer(
           mtime: 0,
           kind: 'html',
           mime: 'text/html',
+        },
+        {
+          name: 'proof.csv',
+          path: 'data/proof.csv',
+          type: 'file',
+          size: 512,
+          mtime: 0,
+          kind: 'spreadsheet',
+          mime: 'text/csv',
         },
       ]}
       streaming={false}
@@ -73,19 +145,30 @@ function renderComposer(
 beforeEach(() => {
   fetchMock = vi.fn(async (url: string) => {
     if (url === '/api/mcp/servers') {
-      return new Response(JSON.stringify({ servers: [], templates: [] }), {
+      return new Response(JSON.stringify({
+        servers: [HIGGSFIELD_MCP],
+        templates: [
+          {
+            id: 'higgsfield-template',
+            label: 'Higgsfield Template',
+            description: 'Image and video generation MCP template.',
+            transport: 'http',
+            category: 'image-generation',
+          },
+        ],
+      }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
     }
     if (url === '/api/plugins') {
-      return new Response(JSON.stringify({ plugins: [] }), {
+      return new Response(JSON.stringify({ plugins: [RESEARCH_PLUGIN] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
     }
     if (url === '/api/connectors') {
-      return new Response(JSON.stringify([]), {
+      return new Response(JSON.stringify({ connectors: [FIGMA_CONNECTOR] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -129,5 +212,40 @@ describe('ChatComposer design toolbox', () => {
       '/api/projects/project-1',
       expect.objectContaining({ method: 'PATCH' }),
     );
+  });
+
+  it('gives creative director a searchable index across all resource types', async () => {
+    renderComposer({
+      skills: [
+        DESIGN_TASTE_SKILL,
+        GSAP_SKILL,
+        CREATIVE_DIRECTOR_SKILL,
+        SPREADSHEET_SKILL,
+      ],
+    });
+    await flushMounts();
+
+    fireEvent.click(screen.getByLabelText('打开设计百宝箱'));
+
+    const search = screen.getByLabelText('Search design toolbox resources');
+    fireEvent.change(search, { target: { value: 'research' } });
+
+    await waitFor(() => {
+      expect(screen.getByText('Research Asset Plugin')).toBeTruthy();
+    });
+
+    fireEvent.change(search, { target: { value: '' } });
+    fireEvent.click(screen.getByText('智能匹配下一步'));
+
+    await waitFor(() => {
+      expect(composerText()).toContain('@creative-director');
+      expect(composerText()).toContain('全局资源索引');
+      expect(composerText()).toContain('spreadsheet-ops');
+      expect(composerText()).toContain('Research Asset Plugin');
+      expect(composerText()).toContain('Higgsfield Video MCP');
+      expect(composerText()).toContain('Figma');
+      expect(composerText()).toContain('data/proof.csv');
+      expect(composerText()).toContain('不要只看设计百宝箱推荐项');
+    });
   });
 });

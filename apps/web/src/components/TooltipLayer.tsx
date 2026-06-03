@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom';
 
 type TooltipPlacement = 'top' | 'bottom' | 'left' | 'right';
+type InputModality = 'keyboard' | 'pointer';
 
 interface TooltipState {
   target: HTMLElement;
@@ -83,6 +84,7 @@ function sameStyle(
 export function TooltipLayer() {
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const lastInputRef = useRef<InputModality>('pointer');
   const suppressedTitleRef = useRef<{ target: HTMLElement; title: string } | null>(null);
   const [state, setState] = useState<TooltipState | null>(null);
 
@@ -108,14 +110,23 @@ export function TooltipLayer() {
     suppressedTitleRef.current = { target, title };
   }, [restoreNativeTitle]);
 
-  const hideTooltip = useCallback(() => {
+  const hideTooltip = useCallback((options: { restoreTitle?: boolean } = {}) => {
     if (rafRef.current !== null) {
       window.cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
-    restoreNativeTitle();
+    if (options.restoreTitle !== false) restoreNativeTitle();
     setState(null);
   }, [restoreNativeTitle]);
+
+  const hideTooltipForActivation = useCallback((target: HTMLElement | null) => {
+    if (!target) {
+      hideTooltip();
+      return;
+    }
+    suppressNativeTitle(target);
+    hideTooltip({ restoreTitle: false });
+  }, [hideTooltip, suppressNativeTitle]);
 
   const showTooltip = useCallback((target: HTMLElement) => {
     const text = target.dataset.tooltip?.trim();
@@ -183,7 +194,31 @@ export function TooltipLayer() {
   }, [restoreNativeTitle]);
 
   useEffect(() => {
+    if (!state?.target || typeof MutationObserver === 'undefined') return;
+    const target = state.target;
+    const observer = new MutationObserver(() => {
+      if (!isTooltipTarget(target)) {
+        hideTooltip({ restoreTitle: false });
+      }
+    });
+    observer.observe(target, {
+      attributes: true,
+      attributeFilter: ['aria-expanded', 'class', 'data-tooltip', 'disabled'],
+    });
+    return () => observer.disconnect();
+  }, [hideTooltip, state?.target]);
+
+  useEffect(() => {
+    const shouldShowForFocus = (target: HTMLElement) => {
+      if (lastInputRef.current === 'keyboard') return true;
+      try {
+        return target.matches(':focus-visible');
+      } catch {
+        return false;
+      }
+    };
     const onPointerOver = (event: PointerEvent) => {
+      lastInputRef.current = 'pointer';
       const target = readTooltipTarget(event.target);
       if (target) showTooltip(target);
     };
@@ -194,9 +229,25 @@ export function TooltipLayer() {
       if (next instanceof Node && target.contains(next)) return;
       hideTooltip();
     };
+    const onPointerDown = (event: PointerEvent) => {
+      lastInputRef.current = 'pointer';
+      hideTooltipForActivation(readTooltipTarget(event.target));
+    };
+    const onPointerCancel = () => {
+      lastInputRef.current = 'pointer';
+      hideTooltip();
+    };
+    const onClick = (event: MouseEvent) => {
+      hideTooltipForActivation(readTooltipTarget(event.target));
+    };
     const onFocusIn = (event: FocusEvent) => {
       const target = readTooltipTarget(event.target);
-      if (target) showTooltip(target);
+      if (!target) return;
+      if (shouldShowForFocus(target)) {
+        showTooltip(target);
+        return;
+      }
+      suppressNativeTitle(target);
     };
     const onFocusOut = (event: FocusEvent) => {
       const target = readTooltipTarget(event.target);
@@ -206,11 +257,18 @@ export function TooltipLayer() {
       hideTooltip();
     };
     const onKeyDown = (event: KeyboardEvent) => {
+      lastInputRef.current = 'keyboard';
       if (event.key === 'Escape') hideTooltip();
+      if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+        hideTooltipForActivation(readTooltipTarget(event.target));
+      }
     };
 
     document.addEventListener('pointerover', onPointerOver);
     document.addEventListener('pointerout', onPointerOut);
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('pointercancel', onPointerCancel);
+    document.addEventListener('click', onClick);
     document.addEventListener('focusin', onFocusIn);
     document.addEventListener('focusout', onFocusOut);
     document.addEventListener('keydown', onKeyDown);
@@ -219,13 +277,16 @@ export function TooltipLayer() {
     return () => {
       document.removeEventListener('pointerover', onPointerOver);
       document.removeEventListener('pointerout', onPointerOut);
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('pointercancel', onPointerCancel);
+      document.removeEventListener('click', onClick);
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('focusout', onFocusOut);
       document.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', scheduleUpdatePosition);
       window.removeEventListener('scroll', scheduleUpdatePosition, true);
     };
-  }, [hideTooltip, scheduleUpdatePosition, showTooltip]);
+  }, [hideTooltip, hideTooltipForActivation, scheduleUpdatePosition, showTooltip, suppressNativeTitle]);
 
   if (!state || typeof document === 'undefined') return null;
 

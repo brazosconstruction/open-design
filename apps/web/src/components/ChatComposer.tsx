@@ -11,7 +11,7 @@ import {
 } from "react";
 import { createPortal } from 'react-dom';
 import { useI18n, useT } from '../i18n';
-import type { Dict } from '../i18n/types';
+import type { Dict, Locale } from '../i18n/types';
 import {
   localizeSkillDescription,
   localizeSkillName,
@@ -100,6 +100,14 @@ type DesignToolboxActionId =
   | 'image-gen'
   | 'video-gen';
 
+type DesignToolboxResourceKind =
+  | 'skill'
+  | 'plugin'
+  | 'mcp'
+  | 'mcp-template'
+  | 'connector'
+  | 'file';
+
 interface DesignToolboxAction {
   id: DesignToolboxActionId;
   title: string;
@@ -111,16 +119,44 @@ interface DesignToolboxAction {
   searchTerms: string[];
 }
 
+interface DesignToolboxResourceIndex {
+  skills: SkillSummary[];
+  plugins: InstalledPluginRecord[];
+  mcpServers: McpServerConfig[];
+  mcpTemplates: McpTemplate[];
+  connectors: ConnectorDetail[];
+  projectFiles: ProjectFile[];
+}
+
+type DesignToolboxResourceBase = {
+  key: string;
+  kind: DesignToolboxResourceKind;
+  id: string;
+  title: string;
+  subtitle: string;
+  badge: string;
+  icon: IconName;
+  searchText: string;
+};
+
+type DesignToolboxResource =
+  | (DesignToolboxResourceBase & { kind: 'skill'; skill: SkillSummary })
+  | (DesignToolboxResourceBase & { kind: 'plugin'; plugin: InstalledPluginRecord })
+  | (DesignToolboxResourceBase & { kind: 'mcp'; server: McpServerConfig })
+  | (DesignToolboxResourceBase & { kind: 'mcp-template'; template: McpTemplate })
+  | (DesignToolboxResourceBase & { kind: 'connector'; connector: ConnectorDetail })
+  | (DesignToolboxResourceBase & { kind: 'file'; file: ProjectFile });
+
 const DESIGN_TOOLBOX_ACTIONS: DesignToolboxAction[] = [
   {
     id: 'auto-match',
     title: '智能匹配下一步',
     badge: '匹配',
-    description: '先判断目标，再从 skills / MCP / plugins 里选一组最适合的后续动作。',
+    description: '先定义好看标准，再全局匹配 skills / MCP / plugins / connectors / files。',
     icon: 'sparkles',
     preferredSkillIds: ['creative-director', 'frontend-design', 'design-taste-frontend'],
     categoryHints: ['creative-direction', 'web-artifacts'],
-    searchTerms: ['match', 'recommend', 'next step', 'workflow', 'skills', 'mcp', 'plugins', '匹配', '下一步', '推荐'],
+    searchTerms: ['match', 'recommend', 'next step', 'workflow', 'skills', 'mcp', 'plugins', 'connector', 'files', '匹配', '下一步', '推荐', '流程', '审美'],
   },
   {
     id: 'motion',
@@ -583,6 +619,17 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
       () => mcpServers.filter((s) => s.enabled),
       [mcpServers],
     );
+    const designToolboxResourceIndex = useMemo<DesignToolboxResourceIndex>(
+      () => ({
+        skills,
+        plugins: pluginsForComposer,
+        mcpServers: enabledMcpServers,
+        mcpTemplates,
+        connectors,
+        projectFiles,
+      }),
+      [connectors, enabledMcpServers, mcpTemplates, pluginsForComposer, projectFiles, skills],
+    );
     const composerMentionEntities = useMemo(
       () =>
         buildComposerMentionEntities({
@@ -951,7 +998,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
         ? `${inlineMentionToken(skill.name)}\n${prompt}`
         : prompt;
       if (skill) stageSkillForCurrentTurn(skill);
-      replaceEditorDraft(nextPrompt);
+      applyDesignToolboxDraft(nextPrompt);
+    }
+
+    function applyDesignToolboxDraft(prompt: string) {
+      replaceEditorDraft(prompt);
       setDesignToolboxOpen(false);
       editorRef.current?.focus();
     }
@@ -964,7 +1015,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
           skill,
           workspaceItem: visibleWorkspaceContext,
           activeDraft: draft,
-          skills,
+          resourceIndex: designToolboxResourceIndex,
         }),
         skill,
       );
@@ -976,9 +1027,73 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
           skill,
           workspaceItem: visibleWorkspaceContext,
           activeDraft: draft,
+          resourceIndex: designToolboxResourceIndex,
         }),
         skill,
       );
+    }
+
+    function applyDesignToolboxResource(resource: DesignToolboxResource) {
+      if (resource.kind === 'skill') {
+        applyDesignToolboxSkill(resource.skill);
+        return;
+      }
+
+      const prompt = designToolboxResourcePrompt({
+        resource,
+        workspaceItem: visibleWorkspaceContext,
+        activeDraft: draft,
+        resourceIndex: designToolboxResourceIndex,
+      });
+
+      if (resource.kind === 'plugin') {
+        void (async () => {
+          await pluginsSectionRef.current?.applyById(resource.plugin.id, resource.plugin);
+          applyDesignToolboxDraft(`${inlineMentionToken(resource.plugin.title)}\n${prompt}`);
+        })();
+        return;
+      }
+
+      if (resource.kind === 'mcp') {
+        const label = resource.server.label || resource.server.id;
+        setStagedMcpServers((current) =>
+          current.some((item) => item.id === resource.server.id)
+            ? current
+            : [...current, resource.server],
+        );
+        applyDesignToolboxDraft(`${inlineMentionToken(label)}\n${prompt}`);
+        return;
+      }
+
+      if (resource.kind === 'connector') {
+        setStagedConnectors((current) =>
+          current.some((item) => item.id === resource.connector.id)
+            ? current
+            : [...current, resource.connector],
+        );
+        applyDesignToolboxDraft(`${inlineMentionToken(resource.connector.name)}\n${prompt}`);
+        return;
+      }
+
+      if (resource.kind === 'file') {
+        const path = resource.file.path ?? resource.file.name;
+        setStaged((current) =>
+          current.some((item) => item.path === path)
+            ? current
+            : [
+                ...current,
+                {
+                  path,
+                  name: path.split('/').pop() || path,
+                  kind: looksLikeImage(path) ? 'image' : 'file',
+                },
+              ],
+        );
+        applyDesignToolboxDraft(`${inlineMentionToken(path)}\n${prompt}`);
+        return;
+      }
+
+      applyDesignToolboxDraft(prompt);
     }
 
     function applyLuckyDesignToolboxAction() {
@@ -2109,7 +2224,10 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
                 onClick={() => {
                   setDesignToolboxOpen((v) => {
                     const next = !v;
-                    if (next) setToolsOpen(false);
+                    if (next) {
+                      setComposerEngaged(true);
+                      setToolsOpen(false);
+                    }
                     return next;
                   });
                 }}
@@ -2130,10 +2248,20 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
                   <DesignToolboxPanel
                     actions={DESIGN_TOOLBOX_ACTIONS}
                     skills={skills}
+                    plugins={pluginsForComposer}
+                    mcpServers={enabledMcpServers}
+                    mcpTemplates={mcpTemplates}
+                    connectors={connectors}
+                    projectFiles={projectFiles}
                     activeSkillIds={stagedSkills.map((skill) => skill.id)}
+                    activePluginId={activeAppliedPlugin?.pluginId ?? pinnedPluginId ?? null}
+                    activeMcpServerIds={stagedMcpServers.map((server) => server.id)}
+                    activeConnectorIds={stagedConnectors.map((connector) => connector.id)}
+                    activeFilePaths={staged.map((item) => item.path)}
                     onLucky={applyLuckyDesignToolboxAction}
                     onPickAction={applyDesignToolboxAction}
                     onPickSkill={applyDesignToolboxSkill}
+                    onPickResource={applyDesignToolboxResource}
                   />
                 </div>
               ) : null}
@@ -2929,21 +3057,57 @@ function ToolsMcpPanel({
 function DesignToolboxPanel({
   actions,
   skills,
+  plugins,
+  mcpServers,
+  mcpTemplates,
+  connectors,
+  projectFiles,
   activeSkillIds,
+  activePluginId,
+  activeMcpServerIds,
+  activeConnectorIds,
+  activeFilePaths,
   onLucky,
   onPickAction,
   onPickSkill,
+  onPickResource,
 }: {
   actions: DesignToolboxAction[];
   skills: SkillSummary[];
+  plugins: InstalledPluginRecord[];
+  mcpServers: McpServerConfig[];
+  mcpTemplates: McpTemplate[];
+  connectors: ConnectorDetail[];
+  projectFiles: ProjectFile[];
   activeSkillIds: string[];
+  activePluginId: string | null;
+  activeMcpServerIds: string[];
+  activeConnectorIds: string[];
+  activeFilePaths: string[];
   onLucky: () => void;
   onPickAction: (action: DesignToolboxAction) => void;
   onPickSkill: (skill: SkillSummary) => void;
+  onPickResource: (resource: DesignToolboxResource) => void;
 }) {
   const { locale } = useI18n();
   const [query, setQuery] = useState('');
   const activeSkillSet = useMemo(() => new Set(activeSkillIds), [activeSkillIds]);
+  const activeMcpServerSet = useMemo(() => new Set(activeMcpServerIds), [activeMcpServerIds]);
+  const activeConnectorSet = useMemo(() => new Set(activeConnectorIds), [activeConnectorIds]);
+  const activeFileSet = useMemo(() => new Set(activeFilePaths), [activeFilePaths]);
+  const resources = useMemo(
+    () =>
+      buildDesignToolboxResources({
+        skills,
+        plugins,
+        mcpServers,
+        mcpTemplates,
+        connectors,
+        projectFiles,
+        locale,
+      }),
+    [connectors, locale, mcpServers, mcpTemplates, plugins, projectFiles, skills],
+  );
   const visibleActions = useMemo(
     () =>
       actions.filter((action) =>
@@ -2951,16 +3115,14 @@ function DesignToolboxPanel({
       ),
     [actions, query, skills],
   );
-  const visibleSkills = useMemo(
+  const visibleResources = useMemo(
     () => {
       const source = query
-        ? skills.filter((skill) => isDesignToolboxSkill(skill))
-        : designToolboxDefaultSkills(actions, skills);
-      return source
-        .filter((skill) => (query ? skillMatchesQuery(skill, query) : true))
-        .slice(0, query ? 10 : 6);
+        ? resources.filter((resource) => designToolboxResourceMatchesQuery(resource, query))
+        : designToolboxDefaultResources(actions, resources);
+      return source.slice(0, query ? 14 : 8);
     },
-    [actions, query, skills],
+    [actions, query, resources],
   );
 
   return (
@@ -2984,13 +3146,13 @@ function DesignToolboxPanel({
           className="composer-tools-search"
           value={query}
           onChange={(e) => setQuery(e.currentTarget.value)}
-          placeholder="Search skills / follow-ups..."
-          aria-label="Search design toolbox skills"
+          placeholder="搜索 skills / MCP / plugins / connectors / design files..."
+          aria-label="Search design toolbox resources"
         />
       </div>
       {visibleActions.length > 0 ? (
         <div className="composer-tools-list">
-          <div className="composer-tools-section-label">Follow-up</div>
+          <div className="composer-tools-section-label">后续动作</div>
           {visibleActions.map((action) => {
             const skill = findDesignToolboxSkill(action, skills);
             return (
@@ -3023,41 +3185,56 @@ function DesignToolboxPanel({
           })}
         </div>
       ) : null}
-      {visibleSkills.length > 0 ? (
+      {visibleResources.length > 0 ? (
         <div className="composer-tools-list">
-          <div className="composer-tools-section-label">Skills</div>
-          {visibleSkills.map((skill) => {
-            const active = activeSkillSet.has(skill.id);
+          <div className="composer-tools-section-label">全局资源</div>
+          {visibleResources.map((resource) => {
+            const active = designToolboxResourceIsActive(resource, {
+              skillIds: activeSkillSet,
+              pluginId: activePluginId,
+              mcpServerIds: activeMcpServerSet,
+              connectorIds: activeConnectorSet,
+              filePaths: activeFileSet,
+            });
             return (
               <button
-                key={skill.id}
+                key={resource.key}
                 type="button"
                 role="menuitem"
                 className={`composer-tools-row composer-design-toolbox-row${active ? ' active' : ''}`}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onPickSkill(skill)}
-                title={localizeSkillDescription(locale, skill)}
+                onClick={() => {
+                  if (resource.kind === 'skill') {
+                    onPickSkill(resource.skill);
+                  } else {
+                    onPickResource(resource);
+                  }
+                }}
+                title={resource.subtitle || resource.title}
               >
                 <span className="composer-design-toolbox-icon" aria-hidden>
-                  <Icon name={designToolboxSkillIcon(skill)} size={13} />
+                  <Icon name={resource.icon} size={13} />
                 </span>
                 <span className="composer-tools-row-body">
-                  <strong>{localizeSkillName(locale, skill)}</strong>
+                  <strong>{resource.title}</strong>
                   <span className="composer-tools-row-meta">
-                    {localizeSkillDescription(locale, skill)}
+                    {resource.subtitle}
+                  </span>
+                  <span className="composer-design-toolbox-skill">
+                    {designToolboxResourceKindLabel(resource.kind)}
                   </span>
                 </span>
                 <span className="composer-design-toolbox-badge">
-                  {active ? '已选' : designToolboxSkillBadge(skill)}
+                  {active ? '已选' : resource.badge}
                 </span>
               </button>
             );
           })}
         </div>
       ) : null}
-      {visibleActions.length === 0 && visibleSkills.length === 0 ? (
+      {visibleActions.length === 0 && visibleResources.length === 0 ? (
         <div className="composer-tools-empty">
-          No design follow-up skills found for "{query}".
+          No resources found for "{query}".
         </div>
       ) : null}
     </>
@@ -3167,6 +3344,261 @@ function skillMatchesQuery(skill: SkillSummary, query: string): boolean {
     .join(' ')
     .toLowerCase()
     .includes(q);
+}
+
+function buildDesignToolboxResources({
+  skills,
+  plugins,
+  mcpServers,
+  mcpTemplates,
+  connectors,
+  projectFiles,
+  locale,
+}: DesignToolboxResourceIndex & { locale: Locale }): DesignToolboxResource[] {
+  const resources: DesignToolboxResource[] = [];
+
+  for (const skill of skills) {
+    const title = localizeSkillName(locale, skill);
+    const subtitle = localizeSkillDescription(locale, skill);
+    resources.push({
+      key: `skill:${skill.id}`,
+      kind: 'skill',
+      id: skill.id,
+      title,
+      subtitle,
+      badge: designToolboxSkillBadge(skill),
+      icon: designToolboxSkillIcon(skill),
+      searchText: [
+        'skill',
+        skill.id,
+        skill.name,
+        title,
+        subtitle,
+        skill.mode,
+        skill.surface ?? '',
+        skill.category ?? '',
+        ...skill.triggers,
+      ].join(' '),
+      skill,
+    });
+  }
+
+  for (const plugin of plugins) {
+    const subtitle = plugin.manifest?.description ?? plugin.id;
+    resources.push({
+      key: `plugin:${plugin.id}`,
+      kind: 'plugin',
+      id: plugin.id,
+      title: plugin.title,
+      subtitle,
+      badge: plugin.manifest?.od?.kind ?? 'plugin',
+      icon: 'sparkles',
+      searchText: [
+        'plugin',
+        plugin.id,
+        plugin.title,
+        plugin.sourceKind,
+        plugin.source,
+        subtitle,
+        ...(plugin.manifest?.tags ?? []),
+        plugin.manifest?.od?.kind ?? '',
+        plugin.manifest?.od?.scenario ?? '',
+        plugin.manifest?.od?.mode ?? '',
+      ].join(' '),
+      plugin,
+    });
+  }
+
+  for (const server of mcpServers) {
+    const title = server.label || server.id;
+    const subtitle = server.command || server.url || server.transport;
+    resources.push({
+      key: `mcp:${server.id}`,
+      kind: 'mcp',
+      id: server.id,
+      title,
+      subtitle,
+      badge: 'MCP',
+      icon: 'link',
+      searchText: [
+        'mcp',
+        server.id,
+        title,
+        subtitle,
+        server.transport,
+        server.templateId ?? '',
+      ].join(' '),
+      server,
+    });
+  }
+
+  for (const template of mcpTemplates) {
+    resources.push({
+      key: `mcp-template:${template.id}`,
+      kind: 'mcp-template',
+      id: template.id,
+      title: template.label,
+      subtitle: template.description,
+      badge: template.category,
+      icon: 'plus',
+      searchText: [
+        'mcp template',
+        template.id,
+        template.label,
+        template.description,
+        template.transport,
+        template.category,
+        template.homepage ?? '',
+        template.example ?? '',
+      ].join(' '),
+      template,
+    });
+  }
+
+  for (const connector of connectors) {
+    const toolCount = connector.toolCount ?? connector.tools.length;
+    resources.push({
+      key: `connector:${connector.id}`,
+      kind: 'connector',
+      id: connector.id,
+      title: connector.name,
+      subtitle: [
+        connector.description ?? connector.provider,
+        toolCount > 0 ? `${toolCount} tools` : null,
+        connector.accountLabel ?? null,
+      ].filter(Boolean).join(' · '),
+      badge: connector.category || 'connector',
+      icon: 'link',
+      searchText: [
+        'connector',
+        connector.id,
+        connector.name,
+        connector.provider,
+        connector.category,
+        connector.description ?? '',
+        connector.accountLabel ?? '',
+        ...(connector.featuredToolNames ?? []),
+        ...(connector.allowedToolNames ?? []),
+        ...connector.tools.slice(0, 20).flatMap((tool) => [tool.name, tool.title, tool.description ?? '']),
+      ].join(' '),
+      connector,
+    });
+  }
+
+  const seenFiles = new Set<string>();
+  for (const file of projectFiles) {
+    if (file.type === 'dir') continue;
+    const path = file.path ?? file.name;
+    if (!path || seenFiles.has(path)) continue;
+    seenFiles.add(path);
+    resources.push({
+      key: `file:${path}`,
+      kind: 'file',
+      id: path,
+      title: path,
+      subtitle: [file.kind, file.mime, file.artifactKind ?? ''].filter(Boolean).join(' · '),
+      badge: file.artifactKind ?? file.kind,
+      icon: looksLikeImage(path) ? 'image' : 'file',
+      searchText: [
+        'file',
+        'design file',
+        path,
+        file.name,
+        file.kind,
+        file.mime,
+        file.artifactKind ?? '',
+      ].join(' '),
+      file,
+    });
+  }
+
+  return resources;
+}
+
+function designToolboxResourceMatchesQuery(
+  resource: DesignToolboxResource,
+  query: string,
+): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return resource.searchText.toLowerCase().includes(q);
+}
+
+function designToolboxDefaultResources(
+  actions: DesignToolboxAction[],
+  resources: DesignToolboxResource[],
+): DesignToolboxResource[] {
+  const out: DesignToolboxResource[] = [];
+  const seen = new Set<string>();
+  function add(resource: DesignToolboxResource | null | undefined) {
+    if (!resource || seen.has(resource.key)) return;
+    seen.add(resource.key);
+    out.push(resource);
+  }
+  function addByKindId(kind: DesignToolboxResourceKind, id: string) {
+    add(resources.find((resource) => resource.kind === kind && resource.id === id));
+  }
+
+  addByKindId('skill', 'creative-director');
+  for (const action of actions) {
+    const skill = resources.find((resource) =>
+      resource.kind === 'skill'
+      && action.preferredSkillIds.some((id) => resource.skill.id === id || resource.skill.name === id),
+    );
+    add(skill);
+  }
+  for (const term of ['design', 'image', 'video', 'motion', 'figma']) {
+    for (const resource of resources) {
+      if (out.length >= 8) return out;
+      if (resource.kind !== 'skill' && designToolboxResourceMatchesQuery(resource, term)) {
+        add(resource);
+      }
+    }
+  }
+  return out;
+}
+
+function designToolboxResourceKindLabel(kind: DesignToolboxResourceKind): string {
+  switch (kind) {
+    case 'skill':
+      return 'Skill';
+    case 'plugin':
+      return 'Plugin';
+    case 'mcp':
+      return 'MCP';
+    case 'mcp-template':
+      return 'MCP template';
+    case 'connector':
+      return 'Connector';
+    case 'file':
+      return 'Design file';
+  }
+}
+
+function designToolboxResourceIsActive(
+  resource: DesignToolboxResource,
+  active: {
+    skillIds: Set<string>;
+    pluginId: string | null;
+    mcpServerIds: Set<string>;
+    connectorIds: Set<string>;
+    filePaths: Set<string>;
+  },
+): boolean {
+  switch (resource.kind) {
+    case 'skill':
+      return active.skillIds.has(resource.skill.id);
+    case 'plugin':
+      return active.pluginId === resource.plugin.id;
+    case 'mcp':
+      return active.mcpServerIds.has(resource.server.id);
+    case 'connector':
+      return active.connectorIds.has(resource.connector.id);
+    case 'file':
+      return active.filePaths.has(resource.file.path ?? resource.file.name);
+    case 'mcp-template':
+      return false;
+  }
 }
 
 function findDesignToolboxSkill(
@@ -3342,23 +3774,23 @@ function designToolboxActionPrompt({
   skill,
   workspaceItem,
   activeDraft,
-  skills,
+  resourceIndex,
 }: {
   action: DesignToolboxAction;
   skill: SkillSummary | null;
   workspaceItem: WorkspaceContextItem | null;
   activeDraft: string;
-  skills: SkillSummary[];
+  resourceIndex: DesignToolboxResourceIndex;
 }): string {
   const skillLine = skill
     ? `已选 skill：${skill.name}。请把它作为本轮主要工作流。`
-    : '如果没有匹配到具体 skill，请先从当前可用 skills / MCP / plugins 中选择最合适的组合。';
-  const availableLine = designToolboxAvailableSkillsLine(skills);
+    : '如果没有匹配到具体 skill，请先从当前可用 skills / MCP / plugins / connectors / design files 中选择最合适的组合。';
+  const resourceLines = designToolboxResourceIndexLines(resourceIndex);
   const draftLine = designToolboxDraftLine(activeDraft);
   const base = [
     designToolboxContextLine(workspaceItem),
     skillLine,
-    availableLine,
+    ...resourceLines,
     draftLine,
   ].filter(Boolean);
 
@@ -3366,7 +3798,11 @@ function designToolboxActionPrompt({
     case 'auto-match':
       return [
         ...base,
-        '请先判断这个设计现在最值得做的下一步目标，然后匹配 2-3 个 skills / MCP / plugins 方案；如果有明显最佳方案，直接执行它并说明为什么。',
+        '请作为 Creative Director 总调度完成一套设计流程：',
+        '1. 先帮我定义“什么是好看的设计”：受众、业务目标、品牌气质、风格参考、信息密度、色彩/字体/动效/素材标准，以及不能出现的 AI 味/模板感。',
+        '2. 搜索并匹配上面的全量资源索引，不要只看设计百宝箱推荐项；需要时组合 skills、MCP、plugins、connectors 和 design files。',
+        '3. 如果目标或审美标准还不够清楚，用有限选项或表单式 UI 引导我选择，并给出推荐默认项；如果已经足够清楚，直接执行下一步。',
+        '4. 按“诊断 -> 风格方向 -> 资源选择 -> 具体改动/生成 -> 验证”的顺序走完全程。每一步说明为什么选这些资源，以及下一步需要我确认什么。',
       ].join('\n');
     case 'motion':
       return [
@@ -3405,25 +3841,98 @@ function designToolboxSkillPrompt({
   skill,
   workspaceItem,
   activeDraft,
+  resourceIndex,
 }: {
   skill: SkillSummary;
   workspaceItem: WorkspaceContextItem | null;
   activeDraft: string;
+  resourceIndex: DesignToolboxResourceIndex;
 }): string {
   return [
     designToolboxContextLine(workspaceItem),
     `使用 ${skill.name} 处理当前设计。`,
+    ...designToolboxResourceIndexLines(resourceIndex),
     designToolboxDraftLine(activeDraft),
     '请先判断最合适的加工目标，再直接完成一轮具体改动；如果它依赖外部素材或 API，请给出可运行的替代方案或明确需要我补充什么。',
   ].filter(Boolean).join('\n');
 }
 
-function designToolboxAvailableSkillsLine(skills: SkillSummary[]): string {
-  const names = designToolboxDefaultSkills(DESIGN_TOOLBOX_ACTIONS, skills)
-    .slice(0, 10)
-    .map((skill) => skill.name);
-  if (names.length === 0) return '';
-  return `可参考的设计后续 skills：${names.join(', ')}。`;
+function designToolboxResourcePrompt({
+  resource,
+  workspaceItem,
+  activeDraft,
+  resourceIndex,
+}: {
+  resource: Exclude<DesignToolboxResource, { kind: 'skill' }>;
+  workspaceItem: WorkspaceContextItem | null;
+  activeDraft: string;
+  resourceIndex: DesignToolboxResourceIndex;
+}): string {
+  const base = [
+    designToolboxContextLine(workspaceItem),
+    `已选资源：${designToolboxResourceKindLabel(resource.kind)} · ${resource.title}（${resource.id}）。`,
+    resource.subtitle ? `资源说明：${resource.subtitle}` : '',
+    ...designToolboxResourceIndexLines(resourceIndex),
+    designToolboxDraftLine(activeDraft),
+  ].filter(Boolean);
+
+  switch (resource.kind) {
+    case 'plugin':
+      return [
+        ...base,
+        '请把这个 plugin 当作当前设计流程的主要上下文。如果它暴露输入项或 GenUI，请在需要时引导我选择；如果不适合当前目标，请改选更合适的全局资源并说明原因。',
+      ].join('\n');
+    case 'mcp':
+      return [
+        ...base,
+        '请优先使用这个 MCP 能力完成当前设计下一步。需要外部素材、网页截图、图像/视频生成或数据时，先判断它能否完成，再给出可执行计划。',
+      ].join('\n');
+    case 'mcp-template':
+      return [
+        ...base,
+        '这个 MCP 是可配置模板。如果它是完成当前设计最需要的工具，请先引导我完成配置；如果已有替代资源可用，请先用替代资源继续。',
+      ].join('\n');
+    case 'connector':
+      return [
+        ...base,
+        '请在需要真实数据、素材、账号内容或外部工作流时使用这个 connector；使用前先说明会读取/写入什么，必要时让我确认。',
+      ].join('\n');
+    case 'file':
+      return [
+        ...base,
+        '请把这个 design file 作为当前设计对象或参考资产，基于它完成下一步加工；如果需要同时比较其他文件，请从全量 design files 中继续搜索。',
+      ].join('\n');
+  }
+}
+
+function designToolboxResourceIndexLines(index: DesignToolboxResourceIndex): string[] {
+  const files = index.projectFiles
+    .filter((file) => file.type !== 'dir')
+    .map((file) => file.path ?? file.name);
+  return [
+    `全局资源索引：skills(${index.skills.length})、plugins(${index.plugins.length})、MCP(${index.mcpServers.length} enabled / ${index.mcpTemplates.length} templates)、connectors(${index.connectors.length} connected)、design files(${files.length})。`,
+    designToolboxCompactLine('可搜索 skills', index.skills.map((skill) => skill.name), 60),
+    designToolboxCompactLine('可搜索 plugins', index.plugins.map((plugin) => plugin.title), 40),
+    designToolboxCompactLine('可用 MCP', [
+      ...index.mcpServers.map((server) => server.label || server.id),
+      ...index.mcpTemplates.map((template) => `${template.label} template`),
+    ], 40),
+    designToolboxCompactLine('已连接 connectors', index.connectors.map((connector) => connector.name), 30),
+    designToolboxCompactLine('可参考 design files', files, 40),
+    '流程规则：先定义审美目标和约束，再搜索/匹配资源；需要用户选择时生成有限选项 UI，引导确认后继续执行。',
+  ].filter(Boolean);
+}
+
+function designToolboxCompactLine(
+  label: string,
+  values: string[],
+  limit: number,
+): string {
+  const clean = Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+  if (clean.length === 0) return '';
+  const shown = clean.slice(0, limit);
+  const suffix = clean.length > shown.length ? `, +${clean.length - shown.length} more` : '';
+  return `${label}：${shown.join(', ')}${suffix}。`;
 }
 
 function skillMentionRank(skill: SkillSummary, query: string): number {
