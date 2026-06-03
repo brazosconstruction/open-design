@@ -19,6 +19,7 @@ const {
   importGitHubDesignSystemMock,
   fetchProviderModelsMock,
   fetchLatestGithubReleaseInfoMock,
+  analyticsTrackMock,
 } = vi.hoisted(() => ({
   playSoundMock: vi.fn(),
   requestNotificationPermissionMock: vi.fn(),
@@ -34,6 +35,7 @@ const {
   importGitHubDesignSystemMock: vi.fn(),
   fetchProviderModelsMock: vi.fn(),
   fetchLatestGithubReleaseInfoMock: vi.fn(),
+  analyticsTrackMock: vi.fn(),
 }));
 
 vi.mock('../../src/utils/notifications', async () => {
@@ -70,6 +72,18 @@ vi.mock('../../src/providers/registry', async () => {
 
 vi.mock('../../src/providers/provider-models', () => ({
   fetchProviderModels: fetchProviderModelsMock,
+}));
+
+vi.mock('../../src/analytics/provider', () => ({
+  useAnalytics: () => ({
+    track: analyticsTrackMock,
+    setConsent: () => undefined,
+    setIdentity: () => undefined,
+    setConfigureGlobals: () => undefined,
+    anonymousId: 'test-anonymous',
+    sessionId: 'test-session',
+    newRequestId: () => 'test-request',
+  }),
 }));
 
 import { SettingsDialog } from '../../src/components/SettingsDialog';
@@ -296,6 +310,7 @@ beforeEach(() => {
   importLocalDesignSystemMock.mockReset();
   importGitHubDesignSystemMock.mockReset();
   fetchProviderModelsMock.mockReset();
+  analyticsTrackMock.mockReset();
   notificationPermissionMock.mockReturnValue('default');
   requestNotificationPermissionMock.mockResolvedValue('granted');
   showCompletionNotificationMock.mockResolvedValue('shown');
@@ -779,6 +794,19 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     expect(
       within(modelPopover).getAllByRole('option').map((option) => option.textContent?.trim()),
     ).toEqual(expect.arrayContaining(['Account Model (gpt-account)', 'gpt-4o', 'Custom (type below)…']));
+    expect(analyticsTrackMock).toHaveBeenCalledWith(
+      'settings_byok_models_fetch_result',
+      expect.objectContaining({
+        page_name: 'settings',
+        area: 'configure_execution_mode_byok',
+        provider_id: 'openai',
+        result: 'success',
+        trigger: 'auto',
+        source: 'network',
+        model_count: 1,
+      }),
+      undefined,
+    );
 
     fireEvent.click(screen.getByRole('tab', { name: 'Azure OpenAI' }));
     expect(screen.queryByRole('button', { name: 'Fetch models' })).toBeNull();
@@ -1085,13 +1113,31 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
 
-    expect(screen.getByRole('alert').textContent).toContain('Invalid API key.');
+    expect(
+      screen.getByText('This looks like an OpenAI key, not an Anthropic key.'),
+    ).toBeTruthy();
     await waitFor(() => {
       const testConnectionCalls = fetchMock.mock.calls.filter(
         ([input]) => input.toString() === '/api/test/connection',
       );
       expect(testConnectionCalls).toHaveLength(0);
     });
+    expect(analyticsTrackMock).toHaveBeenCalledWith(
+      'settings_byok_test_result',
+      expect.objectContaining({
+        page_name: 'settings',
+        area: 'execution_model',
+        provider_id: 'anthropic',
+        result: 'failed',
+        error_code: 'api_key_wrong_protocol',
+        error_kind: 'api_key_wrong_protocol',
+        field_missing: 'none',
+        config_key_changed: false,
+        success_after_action: false,
+        duration_ms: 0,
+      }),
+      undefined,
+    );
   });
 
   it('sends a cleaned API key when the pasted value has trailing newline/zero-width characters', async () => {
@@ -1139,6 +1185,47 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
     expect(sentApiKey).toBe('sk-ant-test-provider');
   });
 
+  it('shows a BYOK API key cleaned notice after blur cleanup', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/memory') {
+        return new Response(
+          JSON.stringify({ enabled: true, memories: [], extraction: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      expect(url).toBe('/api/test/connection');
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          kind: 'ok',
+          latencyMs: 7,
+          model: 'claude-sonnet-4-5',
+          sample: 'pong',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSettingsDialog();
+
+    const apiKeyInput = screen.getByLabelText('API key') as HTMLInputElement;
+    fireEvent.change(apiKeyInput, {
+      target: { value: ' \u200Bsk-ant-test-provider\n' },
+    });
+    fireEvent.blur(apiKeyInput);
+
+    await waitFor(() => {
+      expect(apiKeyInput.value).toBe('sk-ant-test-provider');
+    });
+    expect(screen.getByText(en['settings.apiKeyCleaned'])).toBeTruthy();
+    const testConnectionCalls = fetchMock.mock.calls.filter(
+      ([input]) => input.toString() === '/api/test/connection',
+    );
+    expect(testConnectionCalls).toHaveLength(1);
+  });
+
   it('lets users retry a failed BYOK connection test without editing the API key', async () => {
     let attempt = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -1184,6 +1271,65 @@ describe('SettingsDialog execution settings BYOK interactions', () => {
       ([input]) => input.toString() === '/api/test/connection',
     );
     expect(testConnectionCalls).toHaveLength(2);
+  });
+
+  it('marks a successful BYOK test after a config edit as success after action', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url === '/api/memory') {
+        return new Response(
+          JSON.stringify({ enabled: true, memories: [], extraction: null }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      expect(url).toBe('/api/test/connection');
+      const body = JSON.parse(String(init?.body)) as { apiKey?: string };
+      return new Response(
+        JSON.stringify(
+          body.apiKey === 'sk-ant-fixed'
+            ? {
+                ok: true,
+                kind: 'ok',
+                latencyMs: 20,
+                model: 'claude-sonnet-4-5',
+                sample: 'pong',
+              }
+            : {
+                ok: false,
+                kind: 'auth_failed',
+                latencyMs: 18,
+                model: 'claude-sonnet-4-5',
+              },
+        ),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderSettingsDialog({ apiKey: 'sk-ant-stale' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+    expect(await screen.findByRole('button', { name: 'Retry test' })).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'sk-ant-fixed' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+
+    expect(await screen.findByText(/Connected\. Replied in 20 ms/)).toBeTruthy();
+    expect(analyticsTrackMock).toHaveBeenCalledWith(
+      'settings_byok_test_result',
+      expect.objectContaining({
+        page_name: 'settings',
+        area: 'execution_model',
+        provider_id: 'anthropic',
+        result: 'success',
+        field_missing: 'none',
+        config_key_changed: true,
+        success_after_action: true,
+      }),
+      undefined,
+    );
   });
 });
 

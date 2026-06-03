@@ -1,7 +1,12 @@
-import type { Ref } from 'react';
+import { useMemo, useState, type Ref } from 'react';
 import { API_KEY_PLACEHOLDERS } from '../../state/apiProtocols';
 import type { ApiProtocol, ConnectionTestResponse } from '../../types';
 import { Icon } from '../Icon';
+import {
+  cleanByokApiKey,
+  type ByokDraftIssue,
+  type ByokDraftValidation,
+} from './validation';
 
 type ByokProviderTestState =
   | { status: 'idle' }
@@ -18,6 +23,7 @@ interface ByokKeyFieldProps {
   inputRef: Ref<HTMLInputElement>;
   labels: {
     apiHint: string;
+    apiKeyCleaned: string;
     apiKey: string;
     apiKeyGetLink: string;
     apiKeyInvalid: string;
@@ -32,6 +38,7 @@ interface ByokKeyFieldProps {
     testTitle: string;
   };
   providerTestState: ByokProviderTestState;
+  draftValidation: ByokDraftValidation;
   renderTestMessage: (result: ConnectionTestResponse) => string;
   requiresApiKey: boolean;
   showApiKey: boolean;
@@ -52,6 +59,7 @@ export function ByokKeyField({
   inputRef,
   labels,
   providerTestState,
+  draftValidation,
   renderTestMessage,
   requiresApiKey,
   showApiKey,
@@ -61,6 +69,29 @@ export function ByokKeyField({
   onTestProvider,
   onToggleShowApiKey,
 }: ByokKeyFieldProps) {
+  const [apiKeyCleanedNotice, setApiKeyCleanedNotice] = useState(false);
+  const apiKeyDraftIssue = useMemo(
+    () => firstApiKeyDraftIssue(draftValidation),
+    [draftValidation],
+  );
+  const apiKeyErrorMessage = apiKeyDraftIssue
+    ? apiKeyDraftIssue.message || labels.apiKeyInvalid
+    : apiKeyAuthFailed && providerTestState.status === 'idle'
+      ? labels.apiKeyInvalid
+      : null;
+  const handleChange = (value: string) => {
+    setApiKeyCleanedNotice(false);
+    onChange(value);
+  };
+  const handleBlur = () => {
+    const cleaned = cleanByokApiKey(apiKey);
+    if (cleaned !== apiKey) {
+      setApiKeyCleanedNotice(Boolean(cleaned));
+      onChange(cleaned);
+    }
+    onBlur();
+  };
+
   return (
     <label className="field">
       <span className="field-label-row">
@@ -90,8 +121,9 @@ export function ByokKeyField({
           type={showApiKey ? 'text' : 'password'}
           placeholder={API_KEY_PLACEHOLDERS[apiProtocol]}
           value={apiKey}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={onBlur}
+          aria-invalid={apiKeyDraftIssue ? 'true' : undefined}
+          onChange={(e) => handleChange(e.target.value)}
+          onBlur={handleBlur}
           onFocus={onFocus}
           autoFocus
         />
@@ -106,9 +138,14 @@ export function ByokKeyField({
           {showApiKey ? labels.hide : labels.show}
         </button>
       </div>
-      {apiKeyAuthFailed && providerTestState.status === 'idle' ? (
+      {apiKeyErrorMessage ? (
         <span className="field-error" role="alert">
-          {labels.apiKeyInvalid}
+          {apiKeyErrorMessage}
+        </span>
+      ) : null}
+      {apiKeyCleanedNotice && !apiKeyErrorMessage ? (
+        <span className="field-inline-status success" role="status">
+          {labels.apiKeyCleaned}
         </span>
       ) : null}
       {providerTestState.status === 'running' ? (
@@ -167,4 +204,18 @@ export function ByokKeyField({
       ) : null}
     </label>
   );
+}
+
+function firstApiKeyDraftIssue(
+  draftValidation: ByokDraftValidation,
+): ByokDraftIssue | null {
+  return draftValidation.issues.find(
+    (issue) =>
+      issue.field === 'api_key' &&
+      issue.level === 'error' &&
+      (
+        issue.code === 'api_key_malformed' ||
+        issue.code === 'api_key_wrong_protocol'
+      ),
+  ) ?? null;
 }

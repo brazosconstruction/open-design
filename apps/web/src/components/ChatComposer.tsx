@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from 'react-dom';
+import { Button } from '@open-design/components';
 import { useI18n, useT } from '../i18n';
 import type { Dict } from '../i18n/types';
 import {
@@ -2277,8 +2278,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
                 ) : null}
               </div>
             ) : null}
-            <button
-              className="icon-btn"
+            <Button
+              size="icon"
               data-testid="chat-attach"
               onClick={() => {
                 trackChatPanelClick(analytics.track, {
@@ -2297,7 +2298,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
               ) : (
                 <Icon name="attach" size={15} />
               )}
-            </button>
+            </Button>
             {footerAccessory}
             <span className="composer-spacer" />
             {showStopButton ? (

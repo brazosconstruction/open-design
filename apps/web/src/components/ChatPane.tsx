@@ -473,7 +473,10 @@ export function ChatPane({
     retryAssistant && failedRunErrorEvent ? retryAssistant.id : null;
   // AMR promotion card payload (only the non-AMR model/auth/quota case).
   const amrSwitchPayload =
-    runFailureUi?.showSwitchCard && retryAssistant && failedRunErrorEvent?.code
+    runFailureUi?.showSwitchCard
+    && failedRunErrorEvent?.code !== 'UPSTREAM_UNAVAILABLE'
+    && retryAssistant
+    && failedRunErrorEvent?.code
       ? {
           errorCode: failedRunErrorEvent.code,
           projectId: projectId ?? '',

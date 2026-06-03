@@ -369,4 +369,30 @@ describe('structured agent stream fixtures', () => {
       },
     });
   });
+
+  it('emits GitHub Copilot CLI result usage tokens', () => {
+    const events: unknown[] = [];
+    const handler = createCopilotStreamHandler((event: unknown) => events.push(event));
+    handler.feed(`${JSON.stringify({
+      type: 'result',
+      success: true,
+      usage: {
+        input_tokens: 21,
+        output_tokens: 8,
+        sessionDurationMs: 1234,
+      },
+    })}\n`);
+    handler.flush();
+
+    expect(events).toContainEqual({
+      type: 'usage',
+      usage: {
+        input_tokens: 21,
+        output_tokens: 8,
+        sessionDurationMs: 1234,
+      },
+      stopReason: 'completed',
+      durationMs: 1234,
+    });
+  });
 });
