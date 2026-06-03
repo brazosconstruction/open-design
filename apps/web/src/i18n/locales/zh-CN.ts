@@ -1843,6 +1843,7 @@ export const zhCN: Dict = {
   'manualEdit.title': '手动编辑器',
   'manualEdit.fallbackTitle': '编辑',
   'manualEdit.movePanel': '移动编辑面板',
+  'manualEdit.editParams': '编辑参数',
   'manualEdit.closePanel': '关闭编辑面板',
   'manualEdit.selectLayer': '选择图层',
   'manualEdit.empty': '在预览中点击元素,或选择一个图层。',

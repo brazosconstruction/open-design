@@ -1014,16 +1014,23 @@ describe('FileViewer SVG artifacts', () => {
     });
     const frame = screen.getByTestId('artifact-preview-frame') as HTMLIFrameElement;
 
+    // Hover only surfaces the floating "edit params" affordance (#3438); it
+    // must not open the inspector. Pinning requires an explicit select.
     window.dispatchEvent(new MessageEvent('message', {
       source: frame.contentWindow,
       data: { type: 'od-edit-hover', target: heroTarget },
     }));
-    expect(await screen.findByText('Hero card')).toBeTruthy();
+    expect(await screen.findByTestId('manual-edit-hover-open')).toBeTruthy();
+    expect(screen.queryByText('Hero card')).toBeNull();
 
+    // Selecting pins the inspector to the hero card.
     window.dispatchEvent(new MessageEvent('message', {
       source: frame.contentWindow,
       data: { type: 'od-edit-select', target: heroTarget },
     }));
+    expect(await screen.findByText('Hero card')).toBeTruthy();
+
+    // Hovering a different element must not switch the pinned inspector.
     window.dispatchEvent(new MessageEvent('message', {
       source: frame.contentWindow,
       data: { type: 'od-edit-hover', target: trendTarget },
