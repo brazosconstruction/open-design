@@ -155,6 +155,7 @@ import {
   restoreProjectSnapshotLink,
   resolvePluginSnapshot,
   runPipelineForRun,
+  splitPipelineByExecutionBoundary,
   runStageWithRegistry,
   startSnapshotGc,
   uninstallPlugin,
@@ -13779,19 +13780,20 @@ export async function startServer({
         : {}),
     };
     res.status(202).json(body);
-    // Plan §3.I1 / spec §10.1 — fire the pipeline schedule on the run's
-    // SSE stream BEFORE the agent process is started. The first
-    // pipeline_stage_started event is emitted synchronously (before
-    // the first await inside runPipelineForRun), so any SSE consumer
-    // that subscribes between create() and start() sees a stage event
-    // ahead of the agent's message_chunk stream — exactly what §8 e2e-3
-    // expects. The stub stage runner returns immediately so a
-    // non-loop pipeline walks through every stage in O(stages) time;
-    // the audit row in `run_devloop_iterations` records the timeline.
-    if (resolvedSnapshot?.ok && resolvedSnapshot.snapshot.pipeline) {
+    const pipelineSchedule = resolvedSnapshot?.ok
+      ? splitPipelineByExecutionBoundary(resolvedSnapshot.snapshot.pipeline)
+      : { preRun: null, postRun: null };
+    // Fire only pre-run-safe stages before the agent starts. Stages that
+    // depend on agent-produced artifacts (`visual-validation`) are
+    // deferred until the run succeeds so they inspect the current output
+    // instead of the untouched pre-run workspace.
+    if (resolvedSnapshot?.ok && pipelineSchedule.preRun) {
       firePipelineForRun({
         run,
-        snapshot: resolvedSnapshot.snapshot,
+        snapshot: {
+          ...resolvedSnapshot.snapshot,
+          pipeline: pipelineSchedule.preRun,
+        },
         runs: design.runs,
         db,
       });
@@ -13807,6 +13809,24 @@ export async function startServer({
       }
     }
     design.runs.start(run, () => startChatRun(meta, run));
+    if (resolvedSnapshot?.ok && pipelineSchedule.postRun) {
+      void design.runs.wait(run)
+        .then((finalStatus) => {
+          if (finalStatus.status !== 'succeeded') return;
+          firePipelineForRun({
+            run,
+            snapshot: {
+              ...resolvedSnapshot.snapshot,
+              pipeline: pipelineSchedule.postRun,
+            },
+            runs: design.runs,
+            db,
+          });
+        })
+        .catch((err) => {
+          console.warn('[plugins] post-run pipeline scheduling failed', err);
+        });
+    }
 
     // Analytics v2: emit run_created (daemon-side authoritative) and
     // schedule run_finished on terminal state. The matching `chat-routes.ts`

@@ -94,6 +94,7 @@ export * from './lockfile.js';
 export * from './persistence.js';
 export * from './marketplaces.js';
 export * from './pipeline.js';
+export * from './pipeline-schedule.js';
 export * from './pipeline-runner.js';
 export * from './publish.js';
 export * from './registry.js';
