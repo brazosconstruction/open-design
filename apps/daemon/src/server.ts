@@ -249,6 +249,7 @@ import { renderDesignSystemShowcase } from './design-system-showcase.js';
 import { createChatRunService } from './runs.js';
 import { deriveRunErrorCode, runResultFromStatus } from './run-result.js';
 import { classifyRunFailure } from './run-failure-classification.js';
+import { decideSafeRunRetry } from './run-retry-policy.js';
 import {
   hasExplicitRequestedModelForAnalytics,
   scanRunEventsForUsageAnalytics,
@@ -2293,6 +2294,70 @@ function scanRunEventsForFinishedProps(events, reqBodyModel) {
 
 export function __forTestScanRunEventsForFinishedProps(events, reqBodyModel) {
   return scanRunEventsForFinishedProps(events, reqBodyModel);
+}
+
+function scanRunEventsForRetrySideEffects(events) {
+  const sideEffects = {
+    userVisibleOutputSeen: false,
+    toolCallSeen: false,
+    artifactWriteSeen: false,
+    liveArtifactSeen: false,
+  };
+  for (const rec of Array.isArray(events) ? events : []) {
+    if (rec?.event === 'stdout') {
+      const chunk = rec.data?.chunk;
+      if (typeof chunk === 'string' ? chunk.length > 0 : chunk !== undefined) {
+        sideEffects.userVisibleOutputSeen = true;
+      }
+    }
+    const data = rec?.data;
+    if (!data || typeof data !== 'object') continue;
+    if (data.type === 'text_delta' || data.type === 'thinking_delta') {
+      const delta = typeof data.delta === 'string' ? data.delta : '';
+      if (delta.length > 0) sideEffects.userVisibleOutputSeen = true;
+    }
+    if (data.type === 'tool_use') sideEffects.toolCallSeen = true;
+    if (data.type === 'artifact') sideEffects.artifactWriteSeen = true;
+    if (data.type === 'live_artifact' || rec.event === 'live_artifact') {
+      sideEffects.liveArtifactSeen = true;
+    }
+  }
+  if (
+    countNewHtmlArtifacts(events) > 0 ||
+    didRunCreateDesignSystemFile(events) ||
+    countDesignSystemPreviewModules(events) > 0
+  ) {
+    sideEffects.artifactWriteSeen = true;
+  }
+  return sideEffects;
+}
+
+export function __forTestScanRunEventsForRetrySideEffects(events) {
+  return scanRunEventsForRetrySideEffects(events);
+}
+
+function retryFinalResultForRunStatus(status, retryAttemptCount) {
+  const result = runResultFromStatus(status);
+  if ((retryAttemptCount ?? 0) <= 0) {
+    return result === 'failed' ? 'suppressed' : 'not_attempted';
+  }
+  if (result === 'success') return 'success';
+  if (result === 'failed') return 'failed';
+  return 'suppressed';
+}
+
+export function __forTestRetryFinalResultForRunStatus(status, retryAttemptCount) {
+  return retryFinalResultForRunStatus(status, retryAttemptCount);
+}
+
+function runRetryEventsForAnalytics(events) {
+  return (Array.isArray(events) ? events : []).filter((rec) =>
+    rec?.event === 'run_retry_attempted' || rec?.event === 'run_retry_finished'
+  );
+}
+
+export function __forTestRunRetryEventsForAnalytics(events) {
+  return runRetryEventsForAnalytics(events);
 }
 
 function githubRepoNameFromPluginName(name) {
@@ -11256,7 +11321,11 @@ export async function startServer({
     // disk and a marker inside this turn's message is reflected in this
     // turn's prompt. Failures are swallowed — memory is best-effort and
     // must never block the agent run.
-    if (typeof message === 'string' && message.trim().length > 0) {
+    if (
+      (run.retryAttemptCount ?? 0) === 0 &&
+      typeof message === 'string' &&
+      message.trim().length > 0
+    ) {
       try {
         await extractFromMessage(RUNTIME_DATA_DIR, message);
       } catch (err) {
@@ -11693,6 +11762,146 @@ export async function startServer({
       persistRunEventToAssistantMessage(db, run, event, data);
       design.runs.emit(run, event, data);
     };
+    const retryAnalyticsBase = (decision, failure, errorCode) => {
+      const runProjectKind = resolveRunProjectKindForAnalytics({
+        hintProjectKind: null,
+        projectMetadata: projectRecord?.metadata,
+      });
+      const isDesignSystemRun =
+        runProjectKind === 'design_system' ||
+        (typeof designSystemId === 'string' && designSystemId.length > 0);
+      return {
+        page_name: isDesignSystemRun ? 'design_system_project' : 'chat_panel',
+        area: isDesignSystemRun ? 'design_system_generation' : 'chat_panel',
+        project_id: typeof projectId === 'string' ? projectId : run.projectId,
+        conversation_id:
+          typeof conversationId === 'string' ? conversationId : run.conversationId ?? null,
+        run_id: run.id,
+        retry_of_run_id: run.id,
+        retry_attempt_index: decision.retryAttemptIndex,
+        retry_max_attempts: decision.retryMaxAttempts,
+        retry_strategy: decision.retryStrategy,
+        agent_provider_id: agentIdToTracking(agentId),
+        model_id: modelIdForTracking(safeModel ?? model),
+        ...(failure?.failure_category ? { failure_category: failure.failure_category } : {}),
+        ...(failure?.failure_detail ? { failure_detail: failure.failure_detail } : {}),
+        ...(failure?.failure_stage ? { failure_stage: failure.failure_stage } : {}),
+        ...(errorCode ? { error_code: errorCode } : {}),
+      };
+    };
+    const restartSameRunAfterRetry = () => {
+      run.status = 'queued';
+      run.updatedAt = Date.now();
+      run.child = null;
+      run.acpSession = null;
+      run.exitCode = null;
+      run.signal = null;
+      run.error = null;
+      run.errorCode = null;
+      run.stdinOpen = false;
+      run.pendingHostAnswers?.clear?.();
+      run.analyticsTelemetry = {
+        startRequestedAt: run.analyticsTelemetry?.startRequestedAt ?? run.createdAt,
+      };
+      void startChatRun(chatBody, run).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        design.runs.emit(
+          run,
+          'error',
+          createSseErrorPayload('AGENT_EXECUTION_FAILED', message),
+        );
+        // Route the retried-start failure through the same finalizer as child
+        // close/error so it emits terminal retry telemetry (run_retry_finished
+        // with retry_result: 'failed') and sets run.retryFinalResult, instead
+        // of finishing directly and leaving run_finished to report the fallback
+        // retry_final_result: 'not_attempted'. retryAttemptCount is already 1
+        // here, so decideSafeRunRetry suppresses with attempt_limit_reached and
+        // cannot trigger another restart loop.
+        finishWithRetryDecision('failed', 1, null);
+      });
+    };
+    const finalizeRetryTelemetry = (status, decision, failure, errorCode) => {
+      const attemptCount = run.retryAttemptCount ?? 0;
+      const result = runResultFromStatus(status);
+      if (attemptCount <= 0 && result !== 'failed') {
+        run.retryFinalResult = 'not_attempted';
+        run.retrySuppressedReason = undefined;
+        return;
+      }
+      const retryResult =
+        attemptCount > 0
+          ? result === 'success'
+            ? 'success'
+            : result === 'failed'
+              ? 'failed'
+              : 'suppressed'
+          : 'suppressed';
+      const retrySuppressedReason =
+        retryResult === 'suppressed'
+          ? run.cancelRequested
+            ? 'cancel_requested'
+            : decision?.retrySuppressedReason
+          : undefined;
+      const eventDecision =
+        attemptCount > 0
+          ? { ...decision, retryAttemptIndex: attemptCount }
+          : decision;
+      run.retryFinalResult = retryResult;
+      run.retrySuppressedReason = retrySuppressedReason;
+      design.runs.emit(run, 'run_retry_finished', {
+        ...retryAnalyticsBase(eventDecision, failure, errorCode),
+        retry_result: retryResult,
+        ...(retrySuppressedReason
+          ? { retry_suppressed_reason: retrySuppressedReason }
+          : {}),
+      });
+    };
+    const finishWithRetryDecision = (status, code = null, signal = null) => {
+      const result = runResultFromStatus(status);
+      const errorCode = deriveRunErrorCode({
+        status,
+        error: run.error,
+        errorCode: run.errorCode,
+        exitCode: code,
+        signal,
+      });
+      const failure = classifyRunFailure({
+        result,
+        status: {
+          status,
+          error: run.error,
+          errorCode: run.errorCode,
+          exitCode: code,
+          signal,
+        },
+        ...(errorCode ? { errorCode } : {}),
+        agentId: run.agentId,
+        events: run.events,
+      });
+      const decision = decideSafeRunRetry({
+        result,
+        failure,
+        attemptCount: run.retryAttemptCount ?? 0,
+        sideEffects: {
+          ...scanRunEventsForRetrySideEffects(run.events),
+          cancelRequested: !!run.cancelRequested,
+        },
+      });
+      if (decision.shouldRetry && !design.runs.isTerminal(run.status)) {
+        run.retryAttemptCount = decision.retryAttemptIndex;
+        run.retryFinalResult = undefined;
+        run.retrySuppressedReason = undefined;
+        design.runs.emit(run, 'run_retry_attempted', {
+          ...retryAnalyticsBase(decision, failure, errorCode),
+          retry_reason: decision.retryReason,
+        });
+        restartSameRunAfterRetry();
+        return true;
+      }
+      finalizeRetryTelemetry(status, decision, failure, errorCode);
+      design.runs.finish(run, status, code, signal);
+      return false;
+    };
     const mcpServers = buildLiveArtifactsMcpServersForAgent(def, {
       enabled: Boolean(toolTokenGrant?.token),
       command: process.execPath,
@@ -12105,6 +12314,14 @@ export async function startServer({
     // they just terminated the process. Set strictly inside
     // `failForInactivity`'s quiet-period branch.
     let artifactQuietShutdownRequested = false;
+    // Set when the no-output inactivity watchdog routed this attempt through
+    // the same-run retry finalizer AND that finalizer restarted the run on a
+    // fresh child. The stalled child is then SIGTERM'd, so its later `close`
+    // must NOT finalize the run a second time or unregister the new attempt's
+    // event sink / run handle (both keyed by the shared runId). The close
+    // handler bails early when this is true, revoking only this attempt's own
+    // tool token.
+    let watchdogRetryRestarted = false;
     const summarizeAgentEventForInactivity = (payload) => {
       const type = payload?.type ? String(payload.type) : 'unknown';
       if (type === 'tool_result') {
@@ -12196,7 +12413,17 @@ export async function startServer({
         stallPayload = createSseErrorPayload('AGENT_EXECUTION_FAILED', message, { retryable: true });
       }
       send('error', stallPayload);
-      design.runs.finish(run, 'failed', 1, null);
+      // A silent first-token hang is one of the safe transient failure shapes
+      // this run is allowed to recover: classifyRunFailure maps the stall text
+      // to a retryable `timeout` at `first_token_wait`, and decideSafeRunRetry
+      // permits the same-run retry when no output/tools/artifacts were seen.
+      // Route through the shared finalizer (after surfacing stallPayload) so
+      // the watchdog path gets the same run_retry_attempted/run_retry_finished
+      // telemetry as child close/error — not a bare terminal failure.
+      const retried = finishWithRetryDecision('failed', 1, null);
+      if (retried) {
+        watchdogRetryRestarted = true;
+      }
       if (acpSession?.abort) {
         acpSession.abort();
       }
@@ -13077,18 +13304,29 @@ export async function startServer({
       revokeToolToken('child_exit');
       unregisterChatAgentEventSink();
       send('error', createSseErrorPayload('AGENT_EXECUTION_FAILED', err.message));
-      design.runs.finish(run, 'failed', 1, null);
+      finishWithRetryDecision('failed', 1, null);
     });
     child.on('close', async (code, signal) => {
       try {
       clearInactivityWatchdog();
+      if (watchdogRetryRestarted) {
+        // The inactivity watchdog already failed this attempt and the same-run
+        // retry restarted on a fresh child. Finalization and event-sink / run-
+        // handle ownership (keyed by the shared runId) now belong to the new
+        // attempt, so this stalled child's close must not re-run them — doing
+        // so would re-finalize the run and delete the new attempt's sink.
+        // Revoke only THIS attempt's tool token (idempotent, keyed by its own
+        // token string) and bail; the `finally` block still cleans up logs.
+        revokeToolToken('child_exit');
+        return;
+      }
       revokeToolToken('child_exit');
       unregisterChatAgentEventSink();
       if (acpSession?.hasFatalError()) {
-        return design.runs.finish(run, 'failed', code ?? 1, signal ?? null);
+        return finishWithRetryDecision('failed', code ?? 1, signal ?? null);
       }
       if (agentStreamError) {
-        return design.runs.finish(run, 'failed', code ?? 1, signal ?? null);
+        return finishWithRetryDecision('failed', code ?? 1, signal ?? null);
       }
       if (
         code !== 0 &&
@@ -13100,7 +13338,7 @@ export async function startServer({
           );
           if (amrFailure) {
             sendAmrAccountFailure(amrFailure);
-            return design.runs.finish(run, 'failed', code ?? 1, signal ?? null);
+            return finishWithRetryDecision('failed', code ?? 1, signal ?? null);
           }
         }
         const authFailure = classifyAgentAuthFailure(
@@ -13113,7 +13351,7 @@ export async function startServer({
             authFailure.message ?? cursorAuthGuidance(),
             { retryable: true },
           ));
-          return design.runs.finish(run, 'failed', code ?? 1, signal ?? null);
+          return finishWithRetryDecision('failed', code ?? 1, signal ?? null);
         }
       }
       // Empty-output guard: a clean `code === 0` exit with no visible
@@ -13130,7 +13368,7 @@ export async function startServer({
           'Agent completed without producing any output. The model or provider may have returned an empty response — check the agent logs for upstream errors.',
           { retryable: true },
         ));
-        return design.runs.finish(run, 'failed', code, signal);
+        return finishWithRetryDecision('failed', code, signal);
       }
       if (
         code === 0 &&
@@ -13143,7 +13381,7 @@ export async function startServer({
           'Plugin authoring ended before generating the required generated-plugin artifacts.',
           { retryable: true },
         ));
-        return design.runs.finish(run, 'failed', code, signal);
+        return finishWithRetryDecision('failed', code, signal);
       }
       // Plain-stream auth-failure guard: plain adapters (today
       // antigravity, deepseek's TUI variants) may exit cleanly with
@@ -13171,7 +13409,7 @@ export async function startServer({
             authFailure.message ?? `${def.name} authentication required. Please re-authenticate and retry.`,
             { retryable: true },
           ));
-          return design.runs.finish(run, 'failed', 0, signal);
+          return finishWithRetryDecision('failed', 0, signal);
         }
       }
       // Plain-stream empty-output guard: plain agents send raw stdout
@@ -13233,7 +13471,7 @@ export async function startServer({
           msg,
           { retryable: true },
         ));
-        return design.runs.finish(run, 'failed', 0, signal);
+        return finishWithRetryDecision('failed', 0, signal);
       }
       // ACP agents that don't shut down on stdin.end() (e.g. Devin for
       // Terminal) are forced to exit via SIGTERM from attachAcpSession after
@@ -13374,7 +13612,7 @@ export async function startServer({
       for (const chunk of plaintextStdoutBuffer) {
         send('stdout', { chunk });
       }
-      design.runs.finish(run, status, code, signal);
+      finishWithRetryDecision(status, code, signal);
       } finally {
         // Best-effort cleanup of the per-run agy log file on every close
         // path — successful, failed, cancelled, or non-zero exit — so
@@ -14110,6 +14348,15 @@ export async function startServer({
         const finishedModelId = hasExplicitRequestedModelForAnalytics(reqBody.model)
           ? modelIdForTracking(reqBody.model)
           : modelIdForTracking(usageAnalytics.agent_reported_model);
+        for (const [index, retryEvent] of runRetryEventsForAnalytics(run.events).entries()) {
+          design.analytics.capture({
+            eventName: retryEvent.event,
+            context: analyticsContext,
+            appVersion: design.getAppVersion(),
+            properties: retryEvent.data,
+            insertId: `${runInsertId}-${retryEvent.event}-${index}`,
+          });
+        }
         design.analytics.capture({
           eventName: 'run_finished',
           context: analyticsContext,
@@ -14138,6 +14385,11 @@ export async function startServer({
             // artifact" funnel instead of counting them as failures. See
             // `run-artifacts.ts`; tested in `tests/run-artifacts.test.ts`.
             asked_user_question: runAskedUserQuestion(run.events),
+            retry_attempt_count: run.retryAttemptCount ?? 0,
+            retry_final_result: run.retryFinalResult ?? 'not_attempted',
+            ...(run.retrySuppressedReason
+              ? { retry_suppressed_reason: run.retrySuppressedReason }
+              : {}),
             ...(isDesignSystemRun ? {
               // DS runs land a `DESIGN.md` write when generation
               // succeeded; the run-artifacts inspector reuses the
