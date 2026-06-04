@@ -24,6 +24,7 @@ const healthy: AgentHealthCheckResult = {
     { id: 'authenticated', status: 'pass', label: 'Authenticated.' },
     { id: 'smoke', status: 'pass', label: 'Live reply OK (12ms).' },
   ],
+  smoke: { ok: true, kind: 'success', latencyMs: 12, model: 'default' },
   ranAt: new Date().toISOString(),
 };
 
@@ -52,10 +53,18 @@ const broken: AgentHealthCheckResult = {
 };
 
 describe('AgentHealthCheckPanel', () => {
-  it('tags the overall verdict and renders each check label', () => {
+  it('leads with a concise verdict and reveals the checklist on demand when healthy', () => {
     render(<AgentHealthCheckPanel result={healthy} />);
     const group = screen.getByRole('group');
     expect(group.getAttribute('data-overall')).toBe('pass');
+    // The live latency is the one signal worth a glance; the technical
+    // checklist stays collapsed.
+    expect(screen.getByText('Live reply in 12ms')).toBeTruthy();
+    expect(screen.queryByText('Runs OK (v2026.05.07)')).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: en['settings.healthcheck.details'] }),
+    );
     expect(screen.getByText('Runs OK (v2026.05.07)')).toBeTruthy();
     expect(screen.getByText('Live reply OK (12ms).')).toBeTruthy();
   });
@@ -65,11 +74,14 @@ describe('AgentHealthCheckPanel', () => {
     render(
       <AgentHealthCheckPanel result={broken} handlers={{ onRescan }} />,
     );
-    // The failed `detected` step delegates to AgentDiagnosticRow, which exposes
-    // the rescan affordance as an icon button named by its aria-label.
+    // The failing `detected` step leads (not hidden behind the disclosure) and
+    // delegates to AgentDiagnosticRow, which exposes the rescan affordance as an
+    // icon button named by its aria-label.
     const rescan = screen.getByRole('button', { name: en['settings.rescan'] });
     fireEvent.click(rescan);
     expect(onRescan).toHaveBeenCalledTimes(1);
+    // Skipped steps are tucked into the collapsed details, not shown as results.
+    expect(screen.queryByText('Skipped — binary not found.')).toBeNull();
   });
 
   it('invokes onRerun from the re-run button', () => {

@@ -1565,12 +1565,14 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     fireEvent.change(searchInput, { target: { value: '5.5' } });
 
     const modelPopover = screen.getByTestId('settings-agent-model-popover-codex');
+    // The "Custom…" entry is hidden by default now (novice-first); it only
+    // resurfaces when an agent is already on a custom model id.
     expect(
       within(modelPopover).getAllByRole('option').map((option) => option.textContent?.trim()),
-    ).toEqual(['gpt-4.1-mini', 'gpt-5.5', 'Custom (type below)…']);
+    ).toEqual(['gpt-4.1-mini', 'gpt-5.5']);
   });
 
-  it('labels live CLI model metadata in the model picker', () => {
+  it('hides model-source metadata for live CLI models (novice-first)', () => {
     renderSettingsDialog(
       { mode: 'daemon', agentId: 'codex' },
       {
@@ -1588,13 +1590,15 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI/i }));
-    expect(screen.getByText('Live from CLI')).toBeTruthy();
+    // Where the model list came from is plumbing the user does not care about.
+    expect(screen.queryByText('Live from CLI')).toBeNull();
+    expect(screen.queryByText(/Model list comes from this CLI/i)).toBeNull();
     expect(
-      screen.getByText(/Model list comes from this CLI/i),
+      screen.getByRole('combobox', { name: en['settings.modelPicker'] }),
     ).toBeTruthy();
   });
 
-  it('labels fallback CLI model metadata in the model picker', () => {
+  it('hides model-source metadata for fallback CLI models (novice-first)', () => {
     renderSettingsDialog(
       { mode: 'daemon', agentId: 'codex' },
       {
@@ -1608,9 +1612,11 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI/i }));
-    expect(screen.getByText('Built-in list')).toBeTruthy();
+    expect(screen.queryByText('Built-in list')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pull live models' })).toBeNull();
+    expect(screen.queryByText(/Showing built-in defaults/i)).toBeNull();
     expect(
-      screen.getByText(/Showing built-in defaults/i),
+      screen.getByRole('combobox', { name: en['settings.modelPicker'] }),
     ).toBeTruthy();
   });
 
@@ -1717,7 +1723,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
-    const rescanButton = screen.getByRole('button', { name: /Rescan|Scanning/i }) as HTMLButtonElement;
+    const rescanButton = screen.getByRole('button', { name: /Re-?scan|Scanning/i }) as HTMLButtonElement;
 
     fireEvent.click(rescanButton);
     expect(onRefreshAgents).toHaveBeenCalledTimes(1);
@@ -1726,7 +1732,9 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
       agentCliEnv: {},
     });
     expect(rescanButton.disabled).toBe(true);
-    expect(screen.getByText('Scanning...')).toBeTruthy();
+    // Rescan is now an icon-only secondary action; loading shows via class +
+    // spinner rather than a "Scanning..." label.
+    expect(rescanButton.className).toContain('loading');
 
     fireEvent.click(rescanButton);
     expect(onRefreshAgents).toHaveBeenCalledTimes(1);
@@ -1735,7 +1743,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Scan complete. 2 available.')).toBeTruthy();
-      expect((screen.getByRole('button', { name: /Rescan/i }) as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByRole('button', { name: /Re-?scan/i }) as HTMLButtonElement).disabled).toBe(false);
     });
   });
 
@@ -1750,7 +1758,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
-    fireEvent.click(screen.getByRole('button', { name: /Rescan/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Re-?scan/i }));
 
     await waitFor(() => {
       expect(screen.getByText('Scan failed. Check the daemon and try again.')).toBeTruthy();
@@ -1831,7 +1839,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     expect(screen.getByRole('tab', { name: /BYOK.*API provider/i }).getAttribute('aria-selected')).toBe('true');
   });
 
-  it('renders a Local CLI connection test for selected installed agents', () => {
+  it('renders a Local CLI health check for selected installed agents', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url === '/api/memory') {
@@ -1852,7 +1860,9 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
 
     expect(screen.getByRole('button', { name: /Codex CLI/i })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Test' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Health check' })).toBeTruthy();
+    // The standalone connection test was folded into the health check.
+    expect(screen.queryByRole('button', { name: 'Test' })).toBeNull();
   });
 
   it('renders the AMR local agent without vela branding and with the Local CLI test action', async () => {
@@ -1897,6 +1907,7 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
     expect(screen.queryByText('Limited bonus: +100%')).toBeNull();
     expect(await screen.findByRole('button', { name: 'Authorize' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Test' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Health check' })).toBeNull();
   });
 
   it('only shows the AMR authorization action after selecting the AMR card', async () => {
@@ -2381,6 +2392,92 @@ describe('SettingsDialog execution settings Local CLI interactions', () => {
           (nextConfig as Record<string, unknown>).agentId !== 'amr',
       ),
     ).toBe(false);
+  });
+
+  it('promotes an unavailable AMR into its own slot under "Your CLIs", not the install list', async () => {
+    const unavailableAmr: AgentInfo = {
+      id: 'amr',
+      name: 'AMR (vela)',
+      bin: 'vela',
+      available: false,
+      version: null,
+      models: [],
+      installUrl: 'https://example.com/amr',
+    };
+    const gemini: AgentInfo = {
+      id: 'gemini',
+      name: 'Gemini CLI',
+      bin: 'gemini',
+      available: false,
+      version: null,
+      models: [],
+      installUrl: 'https://github.com/google-gemini/gemini-cli',
+    };
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: 'codex' },
+      { agents: [availableAgents[0]!, unavailableAmr, gemini] },
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Local CLI.*1 installed/i }));
+
+    // AMR lives in the dedicated recommendation slot, not inside the collapsed
+    // "Available to install" list (which therefore only counts Gemini).
+    const amrGroup = screen.getByRole('group', { name: /^Open Design AMR\b/ });
+    const amrSlot = amrGroup.closest('.agent-amr-recommend');
+    expect(amrSlot).toBeTruthy();
+    expect(screen.getByText('Available to install (1)')).toBeTruthy();
+
+    // DOM order: installed grid -> AMR slot -> install collapse.
+    const installedGrid = document.querySelector('.agent-grid-installed')!;
+    const collapse = document.querySelector('.agent-install-collapse')!;
+    expect(
+      installedGrid.compareDocumentPosition(amrSlot!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      amrSlot!.compareDocumentPosition(collapse) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('leads with the AMR slot when no CLI is installed', async () => {
+    const unavailableAmr: AgentInfo = {
+      id: 'amr',
+      name: 'AMR (vela)',
+      bin: 'vela',
+      available: false,
+      version: null,
+      models: [],
+      installUrl: 'https://example.com/amr',
+    };
+    const gemini: AgentInfo = {
+      id: 'gemini',
+      name: 'Gemini CLI',
+      bin: 'gemini',
+      available: false,
+      version: null,
+      models: [],
+      installUrl: 'https://github.com/google-gemini/gemini-cli',
+    };
+    renderSettingsDialog(
+      { mode: 'daemon', agentId: null },
+      { agents: [unavailableAmr, gemini] },
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: /Local CLI/i }));
+
+    const amrGroup = screen.getByRole('group', { name: /^Open Design AMR\b/ });
+    const amrSlot = amrGroup.closest('.agent-amr-recommend');
+    expect(amrSlot).toBeTruthy();
+    // With nothing installed there is no "Your CLIs (0)" group at all — the AMR
+    // slot leads, followed directly by the (auto-expanded) install list.
+    expect(document.querySelector('.agent-group')).toBeNull();
+    expect(screen.queryByText(/Your CLIs/)).toBeNull();
+    const collapse = document.querySelector('.agent-install-collapse')!;
+    expect(
+      amrSlot!.compareDocumentPosition(collapse) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
 

@@ -50,6 +50,45 @@
   flex: 0 0 auto;
 }
 
+/* One-line reassurance for the all-pass case: the single signal worth a
+   glance (live latency). */
+.summary {
+  margin: 0;
+  color: var(--text-muted, var(--text));
+}
+
+/* Progressive disclosure: the full technical checklist (paths / versions /
+   skipped steps) is tucked behind a quiet toggle so the healthy state stays
+   calm and problems stay front-and-center. */
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.detailsToggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted, var(--text));
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.detailsToggle:hover {
+  color: var(--text);
+}
+
+.detailsToggle svg {
+  flex: 0 0 auto;
+}
+
 .checks {
   display: flex;
   flex-direction: column;
