@@ -448,6 +448,40 @@ Expected output:
     expect(screen.getByTestId('assistant-streaming-assistant-1').textContent).toBe('streaming');
   });
 
+  it('clears stale anchor spacer before sending another local turn', () => {
+    const onSend = vi.fn();
+    const { container } = render(
+      <ChatPane
+        projectKindForTracking="prototype"
+        messages={[
+          { id: 'user-1', role: 'user', content: 'Make the landing page', createdAt: 1 },
+          { id: 'assistant-1', role: 'assistant', content: 'Done', createdAt: 2 },
+        ]}
+        streaming={false}
+        error={null}
+        projectId="project-1"
+        projectFiles={[]}
+        onEnsureProject={async () => 'project-1'}
+        onSend={onSend}
+        onStop={vi.fn()}
+        conversations={conversations}
+        activeConversationId="conv-1"
+        onSelectConversation={vi.fn()}
+        onDeleteConversation={vi.fn()}
+        projectMetadata={projectMetadata}
+      />,
+    );
+
+    const spacer = container.querySelector<HTMLElement>('.chat-log-tail-spacer');
+    expect(spacer).not.toBeNull();
+    spacer!.style.height = '320px';
+
+    fireEvent.click(screen.getByTestId('composer-submit'));
+
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(spacer!.style.height).toBe('0px');
+  });
+
   it('renders a stopped pinned todo after a terminal run without a final TodoWrite', () => {
     const messages: ChatMessage[] = [
       {

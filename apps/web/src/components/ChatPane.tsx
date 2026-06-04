@@ -688,6 +688,10 @@ export function ChatPane({
 
   useEffect(() => {
     didInitialScrollRef.current = false;
+    anchorPendingRef.current = false;
+    anchorActiveRef.current = false;
+    prevLastUserIdRef.current = undefined;
+    resetTailSpacer();
     // A new conversation should land at the bottom (its own initial
     // scroll), not inherit the previous conversation's saved position.
     savedChatScrollRef.current = null;
@@ -796,6 +800,7 @@ export function ChatPane({
     prevLastUserIdRef.current = lastUser?.id;
     if (anchorPendingRef.current && lastUser && lastUser.id !== prevUserId) {
       anchorPendingRef.current = false;
+      resetTailSpacer();
       anchorActiveRef.current = true;
       pinnedToBottomRef.current = false;
       setScrolledFromBottom(true);
@@ -1602,6 +1607,8 @@ export function ChatPane({
               }
               // Arm "anchor to top": the messages effect promotes this once
               // the new user turn renders, pinning it to the top of the view.
+              anchorActiveRef.current = false;
+              resetTailSpacer();
               anchorPendingRef.current = true;
               onSend(prompt, attachments, commentAttachments, meta);
             }}
