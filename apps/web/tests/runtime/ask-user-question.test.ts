@@ -38,6 +38,20 @@ describe('repairJsonPrefix', () => {
   it('leaves complete JSON untouched', () => {
     expect(JSON.parse(repairJsonPrefix(FULL))).toEqual(JSON.parse(FULL));
   });
+
+  it('neutralizes a dangling escape inside an open string', () => {
+    expect(JSON.parse(repairJsonPrefix('{"a":"x\\'))).toEqual({ a: 'x' });
+    expect(JSON.parse(repairJsonPrefix('{"a":"x\\u'))).toEqual({ a: 'x' });
+    expect(JSON.parse(repairJsonPrefix('{"a":"x\\u12'))).toEqual({ a: 'x' });
+  });
+
+  it('keeps a completed escape and even backslash runs', () => {
+    expect(JSON.parse(repairJsonPrefix('{"a":"x\\u0041'))).toEqual({ a: 'xA' });
+    // Windows path mid-stream: escaped backslashes are complete pairs.
+    expect(JSON.parse(repairJsonPrefix('{"a":"C:\\\\Users\\\\foo'))).toEqual({ a: 'C:\\Users\\foo' });
+    // A lone trailing backslash (odd run) is the incomplete one — drop it.
+    expect(JSON.parse(repairJsonPrefix('{"a":"C:\\\\Users\\'))).toEqual({ a: 'C:\\Users' });
+  });
 });
 
 describe('parsePartialJson', () => {
@@ -70,6 +84,14 @@ describe('parsePartialAskUserQuestion (token-by-token stability)', () => {
       '{"questions":[{"question":"Q","options":[{"label":"Postgres"},{"lab',
     );
     expect(labelNotYetStarted[0]?.options.map((o) => o.label)).toEqual(['Postgres']);
+  });
+
+  it('does not collapse mid-stream on a prompt ending in a dangling escape', () => {
+    // A question mentioning a Windows path, cut right after a backslash, used
+    // to make the repaired JSON invalid and drop the whole preview to [].
+    const qs = parsePartialAskUserQuestion('{"questions":[{"question":"Edit C:\\');
+    expect(qs).toHaveLength(1);
+    expect(qs[0]?.question).toBe('Edit C:');
   });
 
   it('monotonically converges to the strict parse at completion', () => {

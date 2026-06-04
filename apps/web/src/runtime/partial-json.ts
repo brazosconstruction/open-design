@@ -33,8 +33,17 @@ export function repairJsonPrefix(buf: string): string {
   }
 
   let out = buf;
-  // 1. Close a string cut off mid-value (or mid-key).
-  if (inStr) out += '"';
+  // 1. Close a string cut off mid-value (or mid-key). First neutralize a
+  //    dangling escape at the cut point, otherwise the closing quote would be
+  //    swallowed (`...x\` + `"` → escaped quote) or a partial `\uXXXX` would
+  //    be an invalid escape — either makes JSON.parse fail and collapses the
+  //    live preview. Common in prompts that mention Windows paths, regexes,
+  //    or escaped quotes.
+  if (inStr) {
+    out = out.replace(/\\u[0-9a-fA-F]{0,3}$/, ''); // incomplete \uXXXX
+    if (/(?:^|[^\\])(?:\\\\)*\\$/.test(out)) out = out.slice(0, -1); // lone trailing backslash
+    out += '"';
+  }
   // 2. Trim trailing structural noise that can't be completed into a value:
   //    a dangling comma, then a `"key":` with no value yet. Repeat so a
   //    `, "key":` tail collapses fully.
