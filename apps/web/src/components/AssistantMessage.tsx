@@ -420,10 +420,25 @@ function AssistantMessageImpl({
   // The chat-pane-level PinnedTodoBar renders the canonical TodoWrite card
   // above the composer, so we strip any TodoWrite tool-groups out of the
   // per-message flow to avoid the same task list rendering twice.
+  // A live AskUserQuestion (streaming, no persisted `tool_use` yet) still means
+  // any duplicate hedging markdown the model emitted alongside it must be
+  // suppressed — otherwise the fallback text and the live card render the same
+  // questions at once, the exact duplicate state this card removes. Seed the
+  // fallback suppressor with this so it fires before the persisted tool_use
+  // settles.
+  const hasLiveAskUserQuestion = useMemo(() => {
+    if (!streaming || !liveToolInput) return false;
+    const settledUseIds = new Set(
+      events.filter((e) => e.kind === "tool_use").map((e) => e.id),
+    );
+    return Object.entries(liveToolInput).some(
+      ([id, entry]) => !settledUseIds.has(id) && isAskUserQuestionName(entry.name),
+    );
+  }, [streaming, liveToolInput, events]);
   const persistedBlocks = stripTodoToolGroups(
     stripEmptyThinkingBlocks(
       suppressDuplicateQuestionForms(
-        suppressAskUserQuestionFallbackText(buildBlocks(events)),
+        suppressAskUserQuestionFallbackText(buildBlocks(events), hasLiveAskUserQuestion),
       ),
     ),
   );
@@ -2672,8 +2687,8 @@ function suppressDuplicateQuestionForms(blocks: Block[]): Block[] {
 // assistant message. Claude tends to also write the same questions as
 // markdown text alongside the tool call. The card already shows the
 // content; the prose is hedge that duplicates and confuses the user.
-function suppressAskUserQuestionFallbackText(blocks: Block[]): Block[] {
-  let seenAskUserQuestion = false;
+function suppressAskUserQuestionFallbackText(blocks: Block[], seedSeen = false): Block[] {
+  let seenAskUserQuestion = seedSeen;
   const filtered: Block[] = [];
   for (const block of blocks) {
     if (block.kind === "tool-group") {

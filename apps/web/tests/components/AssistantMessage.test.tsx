@@ -509,3 +509,46 @@ describe('AssistantMessage recovered produced files', () => {
     expect(screen.getByText('agent-sketch.sketch.json')).toBeTruthy();
   });
 });
+
+describe('AssistantMessage live AskUserQuestion fallback suppression', () => {
+  it('suppresses duplicate hedging markdown while a live AskUserQuestion streams', () => {
+    const message = baseMessage({
+      content: '',
+      runStatus: 'running',
+      endedAt: undefined,
+      // Hedging markdown the model emitted alongside the tool call — the exact
+      // duplicate the live card is meant to replace.
+      events: [{ kind: 'text', text: 'UNIQUEFALLBACKPROSEXYZ' } as ChatMessage['events'][number]],
+    });
+    const { container } = render(
+      <AssistantMessage
+        message={message}
+        streaming
+        projectId="proj-1"
+        liveToolInput={{
+          t1: {
+            name: 'AskUserQuestion',
+            text: '{"questions":[{"question":"Which database?","options":[{"label":"Postgres"}]}]}',
+          },
+        }}
+      />,
+    );
+    // The live card renders…
+    expect(container.querySelector('[data-testid="ask-user-question"]')).not.toBeNull();
+    // …and the duplicate prose is suppressed (it would render without the fix).
+    expect(container.textContent).not.toContain('UNIQUEFALLBACKPROSEXYZ');
+  });
+
+  it('keeps assistant prose when no live AskUserQuestion is present', () => {
+    const message = baseMessage({
+      content: '',
+      runStatus: 'running',
+      endedAt: undefined,
+      events: [{ kind: 'text', text: 'UNIQUENORMALPROSEXYZ' } as ChatMessage['events'][number]],
+    });
+    const { container } = render(
+      <AssistantMessage message={message} streaming projectId="proj-1" />,
+    );
+    expect(container.textContent).toContain('UNIQUENORMALPROSEXYZ');
+  });
+});
