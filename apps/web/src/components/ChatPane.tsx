@@ -384,6 +384,17 @@ const CONVERSATION_ROW_HEIGHT_PX = 34;
 const CONVERSATION_VIRTUALIZE_THRESHOLD = 36;
 const CONVERSATION_OVERSCAN_ROWS = 8;
 
+interface RunErrorDiagnosticInput {
+  message: string;
+  rawMessage?: string | null;
+  errorCode?: string;
+  traceId?: string;
+  projectId?: string | null;
+  conversationId?: string | null;
+  assistantMessageId?: string;
+  agentId?: string;
+}
+
 interface QueuedSendItem {
   id: string;
   prompt: string;
@@ -601,6 +612,39 @@ export function ChatPane({
   // / audio errors) then the persisted run error so a reload still shows it.
   const rawError = error ?? failedRunErrorEvent?.detail ?? null;
   const displayError = runFailureUi?.messageKey ? t(runFailureUi.messageKey) : rawError;
+  const errorDiagnosticText = displayError
+    ? buildRunErrorDiagnosticText({
+        message: displayError,
+        rawMessage: rawError,
+        errorCode: failedRunErrorEvent?.code,
+        traceId: retryAssistant?.runId,
+        projectId,
+        conversationId: activeConversationId,
+        assistantMessageId: retryAssistant?.id,
+        agentId: retryAssistant?.agentId,
+      })
+    : null;
+  const [copiedErrorDiagnostic, setCopiedErrorDiagnostic] = useState(false);
+  const errorDiagnosticCopyTimerRef = useRef<number | null>(null);
+  const copyErrorDiagnostic = useCallback(async () => {
+    if (!errorDiagnosticText) return;
+    const ok = await copyToClipboard(errorDiagnosticText);
+    if (!ok) return;
+    if (errorDiagnosticCopyTimerRef.current != null) {
+      window.clearTimeout(errorDiagnosticCopyTimerRef.current);
+    }
+    setCopiedErrorDiagnostic(true);
+    errorDiagnosticCopyTimerRef.current = window.setTimeout(() => {
+      errorDiagnosticCopyTimerRef.current = null;
+      setCopiedErrorDiagnostic(false);
+    }, 1600);
+  }, [errorDiagnosticText]);
+  useEffect(() => () => {
+    if (errorDiagnosticCopyTimerRef.current != null) {
+      window.clearTimeout(errorDiagnosticCopyTimerRef.current);
+      errorDiagnosticCopyTimerRef.current = null;
+    }
+  }, []);
   // The failed run whose error this top-level card represents. AssistantMessage
   // suppresses only THIS message's per-message error pill (to avoid the
   // duplicate); other failed turns — older history, or once a follow-up makes
@@ -1439,70 +1483,85 @@ export function ChatPane({
               {displayError ? (
                 <div className="msg error">
                   <span className="chat-error-text">{displayError}</span>
-                  {retryAssistant && onRetry && runFailureUi ? (
+                  {errorDiagnosticText || (retryAssistant && onRetry && runFailureUi) ? (
                     <div className="chat-error-actions">
-                      {runFailureUi.primaryAction === 'authorize' ? (
+                      {errorDiagnosticText ? (
                         <button
                           type="button"
-                          className="chat-error-action"
-                          onClick={() => {
-                            recordAmrEntry(analytics.track, 'chat_error_authorize_retry');
-                            if (onSwitchToAmrAndRetry) {
-                              onSwitchToAmrAndRetry(retryAssistant);
-                            } else {
-                              onOpenAmrSettings?.();
-                            }
-                          }}
+                          className="ghost chat-error-copy"
+                          onClick={() => void copyErrorDiagnostic()}
+                          aria-label={copiedErrorDiagnostic ? t('chat.copyDone') : t('chat.copyErrorDiagnostic')}
+                          title={copiedErrorDiagnostic ? t('chat.copyDone') : t('chat.copyErrorDiagnostic')}
                         >
-                          {t('chat.amrError.authorizeCta')}
-                        </button>
-                      ) : runFailureUi.primaryAction === 'launch-terminal-auth' ? (
-                        <button
-                          type="button"
-                          className="chat-error-action"
-                          onClick={() => {
-                            onLaunchAntigravityOauth?.();
-                          }}
-                        >
-                          {t('chat.antigravityError.launchTerminalCta')}
-                        </button>
-                      ) : runFailureUi.primaryAction === 'launch-terminal-switch-model' ? (
-                        <button
-                          type="button"
-                          className="chat-error-action"
-                          onClick={() => {
-                            onLaunchAntigravityOauth?.();
-                          }}
-                        >
-                          {t('chat.antigravityError.launchSwitchModelCta')}
-                        </button>
-                      ) : runFailureUi.primaryAction === 'recharge' ? (
-                        <button
-                          type="button"
-                          className="chat-error-action"
-                          onClick={() => {
-                            const attribution = recordAmrEntry(
-                              analytics.track,
-                              'chat_error_recharge',
-                            );
-                            window.open(
-                              attributedAmrUrl(AMR_RECHARGE_URL, attribution),
-                              '_blank',
-                              'noopener,noreferrer',
-                            );
-                          }}
-                        >
-                          {t('chat.amrError.rechargeCta')}
+                          <Icon name={copiedErrorDiagnostic ? 'check' : 'copy'} size={13} />
                         </button>
                       ) : null}
-                      {runFailureUi.primaryAction === 'retry' || runFailureUi.secondaryRetry ? (
-                        <button
-                          type="button"
-                          className="ghost chat-error-retry"
-                          onClick={() => onRetry(retryAssistant)}
-                        >
-                          {t('promptTemplates.retry')}
-                        </button>
+                      {retryAssistant && onRetry && runFailureUi ? (
+                        <>
+                          {runFailureUi.primaryAction === 'authorize' ? (
+                            <button
+                              type="button"
+                              className="chat-error-action"
+                              onClick={() => {
+                                recordAmrEntry(analytics.track, 'chat_error_authorize_retry');
+                                if (onSwitchToAmrAndRetry) {
+                                  onSwitchToAmrAndRetry(retryAssistant);
+                                } else {
+                                  onOpenAmrSettings?.();
+                                }
+                              }}
+                            >
+                              {t('chat.amrError.authorizeCta')}
+                            </button>
+                          ) : runFailureUi.primaryAction === 'launch-terminal-auth' ? (
+                            <button
+                              type="button"
+                              className="chat-error-action"
+                              onClick={() => {
+                                onLaunchAntigravityOauth?.();
+                              }}
+                            >
+                              {t('chat.antigravityError.launchTerminalCta')}
+                            </button>
+                          ) : runFailureUi.primaryAction === 'launch-terminal-switch-model' ? (
+                            <button
+                              type="button"
+                              className="chat-error-action"
+                              onClick={() => {
+                                onLaunchAntigravityOauth?.();
+                              }}
+                            >
+                              {t('chat.antigravityError.launchSwitchModelCta')}
+                            </button>
+                          ) : runFailureUi.primaryAction === 'recharge' ? (
+                            <button
+                              type="button"
+                              className="chat-error-action"
+                              onClick={() => {
+                                const attribution = recordAmrEntry(
+                                  analytics.track,
+                                  'chat_error_recharge',
+                                );
+                                window.open(
+                                  attributedAmrUrl(AMR_RECHARGE_URL, attribution),
+                                  '_blank',
+                                  'noopener,noreferrer',
+                                );
+                              }}
+                            >
+                              {t('chat.amrError.rechargeCta')}
+                            </button>
+                          ) : null}
+                          {runFailureUi.primaryAction === 'retry' || runFailureUi.secondaryRetry ? (
+                            <button
+                              type="button"
+                              className="ghost chat-error-retry"
+                              onClick={() => onRetry(retryAssistant)}
+                            >
+                              {t('promptTemplates.retry')}
+                            </button>
+                          ) : null}
+                        </>
                       ) : null}
                     </div>
                   ) : null}
@@ -2537,6 +2596,29 @@ export function isAssistantMessageStreaming(
   if (message.endedAt !== undefined) return false;
   if (isTerminalRunStatus(message.runStatus)) return false;
   return true;
+}
+
+export function buildRunErrorDiagnosticText(input: RunErrorDiagnosticInput): string {
+  const lines = [
+    'Open Design run error diagnostics',
+    `trace_id: ${input.traceId ?? 'n/a'}`,
+    `run_id: ${input.traceId ?? 'n/a'}`,
+    `error_code: ${input.errorCode ?? 'n/a'}`,
+    `project_id: ${input.projectId ?? 'n/a'}`,
+    `conversation_id: ${input.conversationId ?? 'n/a'}`,
+    `assistant_message_id: ${input.assistantMessageId ?? 'n/a'}`,
+    `agent_id: ${input.agentId ?? 'n/a'}`,
+    '',
+    'error:',
+    input.message.trim(),
+  ];
+
+  const raw = input.rawMessage?.trim();
+  if (raw && raw !== input.message.trim()) {
+    lines.push('', 'raw_error:', raw);
+  }
+
+  return lines.join('\n');
 }
 
 function filterConversations(

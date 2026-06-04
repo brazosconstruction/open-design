@@ -879,6 +879,7 @@ export const ar: Dict = {
   'chat.you': 'أنت',
   'chat.openFile': 'فتح {name}',
   'chat.copyPrompt': 'نسخ الأمر',
+  'chat.copyErrorDiagnostic': 'نسخ تشخيصات الخطأ',
   'chat.copyDone': 'تم النسخ!',
   'chat.composerPlaceholder': "صِف ما تريد إنشاءه…",
   'chat.mode.chat.label': 'Chat',

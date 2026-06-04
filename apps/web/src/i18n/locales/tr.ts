@@ -868,6 +868,7 @@ export const tr: Dict = {
   'chat.you': 'Sen',
   'chat.openFile': '{name}’ı aç',
   'chat.copyPrompt': 'Promptu kopyala',
+  'chat.copyErrorDiagnostic': 'Hata tanısını kopyala',
   'chat.copyDone': 'Kopyalandı!',
   'chat.composerPlaceholder': "Oluşturmak istediğiniz şeyi açıklayın…",
   'chat.mode.chat.label': 'Chat',

@@ -1870,6 +1870,7 @@ export interface Dict {
   'chat.you': string;
   'chat.openFile': string;
   'chat.copyPrompt': string;
+  'chat.copyErrorDiagnostic': string;
   'chat.copyDone': string;
   'chat.composerPlaceholder': string;
   'chat.mode.chat.label': string;

@@ -834,6 +834,7 @@ export const th: Dict = {
   'chat.you': 'คุณ',
   'chat.openFile': 'เปิด {name}',
   'chat.copyPrompt': 'คัดลอกพรอมต์',
+  'chat.copyErrorDiagnostic': 'คัดลอกข้อมูลวิเคราะห์ข้อผิดพลาด',
   'chat.copyDone': 'คัดลอกแล้ว!',
   'chat.composerPlaceholder': "อธิบายสิ่งที่ต้องการสร้าง…",
   'chat.mode.chat.label': 'Chat',

@@ -768,6 +768,7 @@ export const esES: Dict = {
   'chat.you': 'Tú',
   'chat.openFile': 'Abrir {name}',
   'chat.copyPrompt': 'Copiar prompt',
+  'chat.copyErrorDiagnostic': 'Copiar diagnóstico del error',
   'chat.copyDone': '¡Copiado!',
   'chat.composerPlaceholder': "Describe lo que quieres generar…",
   'chat.mode.chat.label': 'Chat',

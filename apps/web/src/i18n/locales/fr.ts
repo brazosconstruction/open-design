@@ -1414,6 +1414,7 @@ export const fr: Dict = {
   'chat.you': 'Vous',
   'chat.openFile': 'Ouvrir {name}',
   'chat.copyPrompt': 'Copier le prompt',
+  'chat.copyErrorDiagnostic': 'Copier le diagnostic d’erreur',
   'chat.copyDone': 'Copié !',
   'chat.composerPlaceholder': 'Décrivez ce que vous voulez générer…',
   'chat.mode.chat.label': 'Chat',

@@ -900,6 +900,7 @@ export const ru: Dict = {
   'chat.you': 'Вы',
   'chat.openFile': 'Открыть {name}',
   'chat.copyPrompt': 'Скопировать запрос',
+  'chat.copyErrorDiagnostic': 'Скопировать диагностику ошибки',
   'chat.copyDone': 'Скопировано!',
   'chat.composerPlaceholder': "Опишите, что хотите сгенерировать…",
   'chat.mode.chat.label': 'Chat',

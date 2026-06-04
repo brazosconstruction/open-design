@@ -901,6 +901,7 @@ export const fa: Dict = {
   'chat.you': 'شما',
   'chat.openFile': 'باز کردن {name}',
   'chat.copyPrompt': 'کپی پرامپت',
+  'chat.copyErrorDiagnostic': 'کپی اطلاعات عیب‌یابی خطا',
   'chat.copyDone': 'کپی شد!',
   'chat.composerPlaceholder': "آنچه می‌خواهید بسازید را توصیف کنید…",
   'chat.mode.chat.label': 'Chat',
