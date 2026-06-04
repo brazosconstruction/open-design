@@ -3073,8 +3073,13 @@ export function ProjectView({
               text: (prev[id]?.text ?? '') + delta,
               // Pin the tool's stream position the first time we see it: the
               // count of events already on the message is everything the model
-              // emitted before the tool call (its preamble).
-              seq: prev[id]?.seq ?? (latestAssistantMsg.events?.length ?? 0),
+              // emitted before the tool call (its preamble). Buffered text
+              // (appendTextEvent) isn't flushed into `events` until the next
+              // frame, so add 1 for any still-pending preamble chunk — it will
+              // commit as one text event just before this tool's position.
+              seq:
+                prev[id]?.seq ??
+                ((latestAssistantMsg.events?.length ?? 0) + (textBuffer.hasPendingText() ? 1 : 0)),
             },
           }));
         },
@@ -5846,5 +5851,10 @@ export function createBufferedTextUpdates({
     window.addEventListener('pagehide', onPageHide);
   }
 
-  return { appendContent, appendTextEvent, appendEvent, flush, cancel };
+  // True when text has been appended but not yet flushed into a `text` event.
+  // Callers that need the soon-to-be-committed event count (e.g. pinning a live
+  // tool's stream position) add 1 for this still-buffered preamble.
+  const hasPendingText = () => pendingTextEventDelta.length > 0;
+
+  return { appendContent, appendTextEvent, appendEvent, flush, cancel, hasPendingText };
 }
