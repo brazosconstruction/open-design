@@ -1,9 +1,14 @@
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
+const execFileAsync = promisify(execFile);
 const e2eRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const workspaceRoot = dirname(e2eRoot);
 const ciWorkflowPath = join(workspaceRoot, ".github", "workflows", "ci.yml");
@@ -237,6 +242,8 @@ describe("packaged smoke workflow", () => {
     expect(workflow).toContain("node --experimental-strip-types .github/scripts/release/r2/verify-beta-metadata.ts");
     expect(publishBetaMetadataScript).toContain("validatePlatformManifest");
     expect(publishBetaMetadataScript).toContain("manifest.releaseVersion !== releaseVersion");
+    expect(publishBetaMetadataScript).toContain("manifest.github?.runId !== currentRunId");
+    expect(publishBetaMetadataScript).toContain("manifest.github?.runAttempt !== currentRunAttempt");
     expect(publishBetaMetadataScript).toContain("manifest.platformKey !== key");
     expect(publishBetaMetadataScript).toContain("manifest.r2.versionPrefix.includes(`/versions/${releaseVersion}`)");
     expect(publishBetaMetadataScript).toContain("refusing stale ${def.key} platform manifest");
@@ -244,6 +251,79 @@ describe("packaged smoke workflow", () => {
     expect(workflow).not.toContain("publish-beta-metadata.ps1");
     expect(workflow).not.toContain("probe-beta-public-read.ps1");
     expect(workflow).not.toContain("publish-beta.ps1 -IndexPath");
+  });
+
+  it("rejects stale latest platform manifests from a previous beta workflow run", async () => {
+    const fixture = await startReleaseMetadataObjectStore({
+      "beta/latest/platforms/mac.json": {
+        artifacts: {
+          dmg: {
+            url: "https://releases.open-design.ai/beta/versions/1.2.3-beta.4.unsigned/Open Design Beta.dmg",
+          },
+        },
+        channel: "beta",
+        github: {
+          runAttempt: 1,
+          runId: 111111111,
+        },
+        platformKey: "mac",
+        r2: {
+          versionPrefix: "beta/versions/1.2.3-beta.4.unsigned",
+        },
+        releaseVersion: "1.2.3-beta.4",
+        signed: false,
+        status: "published",
+      },
+    });
+    const runnerTemp = await mkdtemp(join(tmpdir(), "od-release-beta-metadata-"));
+
+    try {
+      const result = await execFileAsync(
+        process.execPath,
+        ["--experimental-strip-types", releasePublishBetaMetadataScriptPath],
+        {
+          cwd: workspaceRoot,
+          env: {
+            ...process.env,
+            AWS_ACCESS_KEY_ID: "test-access-key",
+            AWS_DEFAULT_REGION: "auto",
+            AWS_SECRET_ACCESS_KEY: "test-secret-key",
+            BASE_VERSION: "1.2.3",
+            BRANCH_NAME: "codex/release-beta-s-mac-arm64",
+            CLOUDFLARE_R2_RELEASES_BUCKET: fixture.bucket,
+            CLOUDFLARE_R2_RELEASES_PUBLIC_ORIGIN: "https://releases.open-design.ai",
+            CLOUDFLARE_R2_RELEASES_URL: fixture.endpointUrl,
+            ENABLE_LINUX: "false",
+            ENABLE_MAC: "true",
+            ENABLE_MAC_INTEL: "false",
+            ENABLE_WIN: "false",
+            GITHUB_RUN_ATTEMPT: "2",
+            GITHUB_RUN_ID: "222222222",
+            MAC_RESULT: "success",
+            PLATFORM_MANIFEST_ROOT: join(runnerTemp, "release-platform-manifests"),
+            PLATFORM_MANIFEST_PREFIX: "beta/latest/platforms",
+            RELEASE_CHANNEL: "beta",
+            RELEASE_SIGNED: "false",
+            RELEASE_VERSION: "1.2.3-beta.4",
+            RUNNER_TEMP: runnerTemp,
+            STATE_SOURCE: "test",
+          },
+          maxBuffer: 1024 * 1024,
+        },
+      ).then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason: unknown) => ({ reason, status: "rejected" as const }),
+      );
+
+      expect(result.status).toBe("rejected");
+      expect(String(result.status === "rejected" ? result.reason : "")).toContain(
+        "refusing stale mac platform manifest for 1.2.3-beta.4: github.runId=111111111",
+      );
+      expect(fixture.uploadedObjectKeys()).toEqual([]);
+    } finally {
+      await fixture.close();
+      await rm(runnerTemp, { force: true, recursive: true });
+    }
   });
 
   it("keeps Windows release report zips materialized before platform publication", async () => {
@@ -327,4 +407,82 @@ function expectReleaseLinuxSmokePreservesEvidenceBeforeApt(workflow: string, ste
   expect(aptIndex).toBeGreaterThan(-1);
   expect(reportDirIndex).toBeGreaterThan(-1);
   expect(reportDirIndex).toBeLessThan(aptIndex);
+}
+
+async function startReleaseMetadataObjectStore(objects: Record<string, unknown>): Promise<{
+  bucket: string;
+  close: () => Promise<void>;
+  endpointUrl: string;
+  uploadedObjectKeys: () => string[];
+}> {
+  const bucket = "release-bucket";
+  const uploadedObjectKeys: string[] = [];
+  const server = createServer((request, response) => {
+    void handleReleaseMetadataObjectStoreRequest(request, response, bucket, objects, uploadedObjectKeys);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (address == null || typeof address === "string") {
+    throw new Error("release metadata object store did not bind to a TCP port");
+  }
+
+  return {
+    bucket,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => (error == null ? resolve() : reject(error)));
+      }),
+    endpointUrl: `http://127.0.0.1:${address.port}`,
+    uploadedObjectKeys: () => [...uploadedObjectKeys],
+  };
+}
+
+async function handleReleaseMetadataObjectStoreRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  bucket: string,
+  objects: Record<string, unknown>,
+  uploadedObjectKeys: string[],
+): Promise<void> {
+  const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+  const bucketPrefix = `/${bucket}/`;
+  if (!path.startsWith(bucketPrefix)) {
+    response.statusCode = 404;
+    response.end("not found");
+    return;
+  }
+
+  const objectKey = decodeURIComponent(path.slice(bucketPrefix.length));
+  if (request.method === "GET") {
+    if (!(objectKey in objects)) {
+      response.statusCode = 404;
+      response.end("not found");
+      return;
+    }
+    const body = JSON.stringify(objects[objectKey]);
+    response.setHeader("content-type", "application/json; charset=utf-8");
+    response.end(body);
+    return;
+  }
+
+  if (request.method === "PUT") {
+    uploadedObjectKeys.push(objectKey);
+    for await (const _chunk of request) {
+      // Drain the request body so the client can complete cleanly.
+    }
+    response.statusCode = 200;
+    response.end("ok");
+    return;
+  }
+
+  response.statusCode = 405;
+  response.end("method not allowed");
 }
