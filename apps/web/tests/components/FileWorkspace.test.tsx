@@ -963,6 +963,34 @@ describe('FileWorkspace launcher tab creation', () => {
       });
     });
   });
+
+  it('focuses an already-open file tab without adding a duplicate tab', async () => {
+    const onTabsStateChange = vi.fn();
+
+    render(
+      <FileWorkspace
+        projectId="project-1"
+        projectKind="prototype"
+        files={[workspaceFile('Web Prototype mutuals-v2.html')]}
+        liveArtifacts={[]}
+        onRefreshFiles={vi.fn()}
+        isDeck={false}
+        tabsState={{
+          tabs: ['Web Prototype mutuals-v2.html'],
+          active: 'notes.html',
+        }}
+        openRequest={{ name: 'Web Prototype mutuals-v2.html', nonce: 1 }}
+        onTabsStateChange={onTabsStateChange}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onTabsStateChange).toHaveBeenCalledWith({
+        tabs: ['Web Prototype mutuals-v2.html'],
+        active: 'Web Prototype mutuals-v2.html',
+      });
+    });
+  });
 });
 
 describe('FileWorkspace generation failure recovery', () => {

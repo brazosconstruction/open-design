@@ -704,11 +704,7 @@ export function FileWorkspace({
       setActiveTab(name);
       return;
     }
-    onTabsStateChange(workspaceTabsState(
-      persistedTabs.includes(name) ? persistedTabs : [...persistedTabs, name],
-      name,
-    ));
-    setActiveTab(name);
+    openFile(name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openRequest]);
 
@@ -737,7 +733,8 @@ export function FileWorkspace({
     // resolves a new terminal/side-chat id), so the closure could be stale and
     // clobber tabs added in the meantime.
     const currentTabs = tabsStateRef.current.tabs;
-    const nextTabs = currentTabs.includes(name) ? currentTabs : [...currentTabs, name];
+    const alreadyOpen = currentTabs.includes(name);
+    const nextTabs = alreadyOpen ? currentTabs : [...currentTabs, name];
     commitTabsState(workspaceTabsState(nextTabs, name));
     setActiveTab(name);
   }
