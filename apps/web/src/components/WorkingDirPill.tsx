@@ -23,7 +23,7 @@ interface Props {
 }
 
 function shortPath(dir: string): string {
-  return dir.split('/').filter(Boolean).slice(-1)[0] ?? dir;
+  return dir.split(/[/\\]/).filter(Boolean).slice(-1)[0] ?? dir;
 }
 
 export function WorkingDirPill({ projectId, resolvedDir: propResolvedDir, onReplaced }: Props) {
