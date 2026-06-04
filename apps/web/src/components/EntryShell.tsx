@@ -618,7 +618,6 @@ export function EntryShell({
       agents={agents}
       providerModelsCache={activeProviderModelsCache}
       onProviderModelsCacheChange={activeSetProviderModelsCache}
-      compact={view === 'home'}
       daemonLive={daemonLive}
       onModeChange={onModeChange}
       onAgentChange={onAgentChange}
@@ -661,7 +660,7 @@ export function EntryShell({
                   </>
                 ) : null}
               </a>
-              {view === 'home' ? null : executionSwitcher}
+              {executionSwitcher}
               <button
                 type="button"
                 className="use-everywhere-chip"
@@ -711,7 +710,6 @@ export function EntryShell({
                 skillsLoading={skillsLoading}
                 connectors={connectors}
                 promptTemplates={promptTemplates}
-                executionSwitcher={view === 'home' ? executionSwitcher : null}
               />
             </div>
             <div data-testid="entry-view-projects" data-active={view === 'projects' ? 'true' : 'false'} {...inactiveViewProps(view === 'projects')}>

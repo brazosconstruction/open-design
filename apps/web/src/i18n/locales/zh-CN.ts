@@ -534,6 +534,7 @@ export const zhCN: Dict = {
   'homeHero.footer.noMatches': "无匹配结果",
   'homeHero.moreShortcuts': "更多",
   'homeHero.railAria': '选择项目类别或启动入口',
+  'homeHero.subTypeAria': '选择子类型',
   'homeHero.confirmReplaceTitle': '替换当前 Prompt？',
   'homeHero.confirmReplaceBody': '使用 {title} 会替换输入框中的现有文本。',
   'homeHero.confirmReplace': '替换',

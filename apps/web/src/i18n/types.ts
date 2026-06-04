@@ -849,6 +849,7 @@ export interface Dict {
   'homeHero.footer.noMatches': string;
   'homeHero.moreShortcuts': string;
   'homeHero.railAria': string;
+  'homeHero.subTypeAria': string;
   'homeHero.confirmReplaceTitle': string;
   'homeHero.confirmReplaceBody': string;
   'homeHero.confirmReplace': string;

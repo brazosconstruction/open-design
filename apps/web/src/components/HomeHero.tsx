@@ -41,6 +41,12 @@ import {
   type HomeHeroChip,
 } from './home-hero/chips';
 import {
+  filterPluginsBySubChip,
+  isSubChipParent,
+  subChipsForChip,
+  type HomeHeroSubChip,
+} from './home-hero/sub-chips';
+import {
   inlineMentionToken,
   type InlineMentionEntity,
 } from '../utils/inlineMentions';
@@ -255,6 +261,10 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
   const [hoveredPlugin, setHoveredPlugin] = useState<InstalledPluginRecord | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Selected second-level sub-category slug (Prototype / Slide deck rail).
+  // Local-only: it filters the example-prompt cards below the rail. It never
+  // binds a plugin or stamps an active badge.
+  const [selectedSubcategory, setSelectedSubcategory] = useState<string | null>(null);
   const [selectedPromptExample, setSelectedPromptExample] = useState<SelectedPromptExample | null>(null);
   const [previewHomeFileKey, setPreviewHomeFileKey] = useState<string | null>(null);
   const [stagedFilePreviewUrls, setStagedFilePreviewUrls] = useState<Map<string, string>>(() => new Map());
@@ -470,6 +480,17 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
         : [],
     [activeChipId, locale, pluginOptions],
   );
+  const activeSubChips = useMemo(
+    () => subChipsForChip(activeChipId, pluginOptions),
+    [activeChipId, pluginOptions],
+  );
+  // When a sub-category pill is active, narrow the example-prompt cards to
+  // that scene; otherwise show the full chip-matched set.
+  const filteredExamplePlugins = useMemo(() => {
+    if (!selectedSubcategory || !isSubChipParent(activeChipId)) return activeExamplePlugins;
+    const narrowed = filterPluginsBySubChip(activeExamplePlugins, activeChipId, selectedSubcategory);
+    return narrowed.length > 0 ? narrowed : activeExamplePlugins;
+  }, [activeExamplePlugins, activeChipId, selectedSubcategory]);
   const activePromptExamples = useMemo(
     () => activeChipId && activeExamplePlugins.length === 0
       ? homeHeroChipPromptExamples(activeChipId, locale)
@@ -495,6 +516,7 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
 
   useEffect(() => {
     setSelectedPromptExample(null);
+    setSelectedSubcategory(null);
   }, [activeChipId]);
 
   useEffect(() => {
@@ -679,15 +701,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     onRemoveFile(index);
   }
 
-  function clearSelectedPromptExample() {
-    if (selectedPromptExample) {
-      onPromptChange('');
-      editorRef.current?.clear();
-      onExamplePromptStatusChange?.(null);
-    }
-    setSelectedPromptExample(null);
-  }
-
   function usePromptExample(example: string) {
     setSelectedPromptExample({
       label: promptExampleChipLabel(example),
@@ -733,7 +746,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
     contextItemCount > 0 ||
     (showActivePluginChip && activePluginTitle) ||
     activeSkillTitle ||
-    selectedPromptExample ||
     selectedPluginContexts.length > 0 ||
     selectedMcpContexts.length > 0 ||
     selectedConnectorContexts.length > 0 ||
@@ -970,27 +982,6 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
                   aria-label={t('homeHero.clearActiveSkill')}
                   title={t('homeHero.clearActiveSkill')}
                   data-tooltip={t('homeHero.clearActiveSkill')}
-                >
-                  <Icon name="close" size={9} />
-                </button>
-              </span>
-            ) : null}
-            {selectedPromptExample ? (
-              <span
-                className="home-hero__active-chip home-hero__active-chip--example"
-                data-testid="home-hero-active-example"
-              >
-                <span className="home-hero__active-icon" aria-hidden>
-                  <Icon name="pencil" size={12} />
-                </span>
-                <span className="home-hero__active-label">{t('homeHero.promptExamples')}: {selectedPromptExample.label}</span>
-                <button
-                  type="button"
-                  className="home-hero__active-clear od-tooltip"
-                  onClick={clearSelectedPromptExample}
-                  aria-label={t('common.close')}
-                  title={t('common.close')}
-                  data-tooltip={t('common.close')}
                 >
                   <Icon name="close" size={9} />
                 </button>
@@ -1311,10 +1302,22 @@ export const HomeHero = forwardRef<HomeHeroHandle, Props>(function HomeHero(
         </RailGroup>
       )}
 
-      {activeExamplePlugins.length > 0 && activeChipId ? (
+      {activeSubChips.length > 0 && isSubChipParent(activeChipId) ? (
+        <SubTypeRow
+          subChips={activeSubChips}
+          selectedSlug={selectedSubcategory}
+          pluginsLoading={pluginsLoading}
+          onPickSubChip={(sub) =>
+            setSelectedSubcategory((current) => (current === sub.slug ? null : sub.slug))
+          }
+          onSelectAll={() => setSelectedSubcategory(null)}
+        />
+      ) : null}
+
+      {filteredExamplePlugins.length > 0 && activeChipId ? (
         <PluginPromptPresets
           chipId={activeChipId}
-          plugins={activeExamplePlugins}
+          plugins={filteredExamplePlugins}
           activePluginId={activePluginRecord?.id ?? null}
           pendingPluginId={pendingPluginId}
           locale={locale}
@@ -1459,16 +1462,15 @@ function PluginPromptPresetCard({
           pluginTitle={record.title}
           preview={preview}
         />
+        {active ? (
+          <span className="home-hero__plugin-preset-check" aria-hidden>
+            <Icon name="check" size={12} />
+          </span>
+        ) : null}
       </span>
-      <span className="home-hero__plugin-preset-body">
-        <span className="home-hero__plugin-preset-title">
-          {record.title}
-        </span>
-        <span className="home-hero__plugin-preset-prompt">
-          {promptPreview}
-        </span>
+      <span className="home-hero__plugin-preset-title">
+        {record.title}
       </span>
-      <Icon name={active ? 'check' : 'external-link'} size={13} aria-hidden />
     </button>
   );
 }
@@ -2315,6 +2317,65 @@ function RailGroup({
         );
       })}
       {children}
+    </div>
+  );
+}
+
+function SubTypeRow({
+  subChips,
+  selectedSlug,
+  pluginsLoading,
+  onPickSubChip,
+  onSelectAll,
+}: {
+  subChips: HomeHeroSubChip[];
+  selectedSlug: string | null;
+  pluginsLoading: boolean;
+  onPickSubChip: (sub: HomeHeroSubChip) => void;
+  onSelectAll: () => void;
+}) {
+  const t = useT();
+  const allActive = selectedSlug === null;
+  return (
+    <div
+      className="home-hero__subtype-row"
+      data-testid="home-hero-subtype-row"
+      role="tablist"
+      aria-label={t('homeHero.subTypeAria')}
+    >
+      <button
+        type="button"
+        className={`home-hero__subtype-chip${allActive ? ' is-active' : ''}`}
+        data-sub-chip-id="all"
+        data-testid="home-hero-subtype-all"
+        onClick={onSelectAll}
+        disabled={pluginsLoading}
+        role="tab"
+        aria-selected={allActive}
+      >
+        <span className="home-hero__subtype-chip-label">{t('common.all')}</span>
+      </button>
+      {subChips.map((sub) => {
+        const isActive = sub.slug === selectedSlug;
+        const cls = ['home-hero__subtype-chip'];
+        if (isActive) cls.push('is-active');
+        return (
+          <button
+            key={sub.slug}
+            type="button"
+            className={cls.join(' ')}
+            data-sub-chip-id={sub.slug}
+            data-testid={`home-hero-subtype-${sub.slug}`}
+            onClick={() => onPickSubChip(sub)}
+            disabled={pluginsLoading}
+            role="tab"
+            aria-selected={isActive}
+          >
+            <Icon name={sub.icon} size={13} className="home-hero__subtype-chip-icon" />
+            <span className="home-hero__subtype-chip-label">{sub.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
