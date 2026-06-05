@@ -107,15 +107,15 @@ fi
 node_version="$(capture_cmd node node --version)"
 npm_version="$(capture_cmd npm npm --version)"
 corepack_version="$(capture_cmd corepack corepack --version)"
-pnpm_version="$(capture_cmd pnpm pnpm --version)"
 git_version="$(capture_cmd git git --version)"
 docker_version="$(capture_cmd docker docker --version)"
 kernel="$(capture_cmd uname uname -a)"
 disk_root="$(df -h / | awk 'NR==2 {print $4 " available of " $2}')"
 workspace_disk="$(df -h "$ci_root" | awk 'NR==2 {print $4 " available of " $2}')"
-pnpm_store="$(capture_cmd pnpm-store pnpm store path --silent)"
+pnpm_version="not-prepared"
+pnpm_store=""
 
-if [ -z "$node_version" ] || [ -z "$npm_version" ] || [ -z "$corepack_version" ] || [ -z "$pnpm_version" ]; then
+if [ -z "$node_version" ] || [ -z "$npm_version" ] || [ -z "$corepack_version" ]; then
   echo "missing required Node package-manager toolchain" >&2
   exit 1
 fi
@@ -142,7 +142,6 @@ append_summary "| docker | \`$docker_version\` |"
 if [ -n "$pnpm_store_dir" ]; then
   mkdir -p "$pnpm_store_dir"
   export npm_config_store_dir="$pnpm_store_dir"
-  pnpm_store="$(pnpm store path --silent)"
 fi
 export npm_config_fetch_retries="$pnpm_fetch_retries"
 export npm_config_fetch_retry_maxtimeout="$pnpm_fetch_retry_maxtimeout"
@@ -252,14 +251,21 @@ if [ "$mode" = "setup" ] || [ "$mode" = "core" ] || [ "$mode" = "policy" ] || [ 
 
   corepack_prepare_start="$(date +%s)"
   set +e
-  timeout 180s corepack prepare "$package_manager" --activate
+  timeout 180s bash -c 'corepack enable && corepack prepare "$1" --activate' _ "$package_manager"
   corepack_prepare_exit_code="$?"
   set -e
   corepack_prepare_seconds="$(( $(date +%s) - corepack_prepare_start ))"
   if [ "$corepack_prepare_exit_code" = "0" ]; then
     corepack_prepare_status="ok"
+    pnpm_version="$(capture_cmd pnpm pnpm --version)"
+    pnpm_store="$(capture_cmd pnpm-store pnpm store path --silent)"
   else
     corepack_prepare_status="failed"
+  fi
+
+  if [ "$corepack_prepare_exit_code" = "0" ] && [ -z "$pnpm_version" ]; then
+    echo "missing required pnpm shim after corepack prepare" >&2
+    exit 1
   fi
 
   append_summary ""
