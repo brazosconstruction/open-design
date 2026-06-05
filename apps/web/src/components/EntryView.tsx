@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import type { DesignSystemGenerateSnapshot } from './DesignSystemFlow';
-import type {
-  ConnectorDetail,
-  ConnectorStatusResponse,
-} from '@open-design/contracts';
+import type { ConnectorDetail } from '@open-design/contracts';
 import type { OpenDesignHostProjectImportSuccess } from '@open-design/host';
 import {
   DEFAULT_AUDIO_MODEL,
@@ -33,9 +30,10 @@ import { EntryShell } from './EntryShell';
 import type { IntegrationTab } from './IntegrationsView';
 import type { CreateInput, ImportClaudeDesignOutcome } from './NewProjectPanel';
 import {
-  fetchConnectors,
-  fetchConnectorStatuses,
-} from '../providers/registry';
+  CONNECTOR_CALLBACK_MESSAGE_TYPE,
+  CONNECTORS_CHANGED_EVENT,
+} from './connectors-events';
+import { fetchConnectorCatalogSnapshot } from './connectors-state';
 import type {
   PluginShareAction,
   PluginShareProjectOutcome,
@@ -134,8 +132,6 @@ interface Props {
   onCompleteOnboarding: () => void;
 }
 
-const CONNECTOR_CALLBACK_MESSAGE_TYPE = 'open-design:connector-connected';
-
 export function isTrustedConnectorCallbackOrigin(origin: string, currentOrigin?: string): boolean {
   const expectedOrigin = currentOrigin ?? (typeof window === 'undefined' ? '' : window.location.origin);
   if (origin === expectedOrigin) return true;
@@ -146,24 +142,6 @@ export function isTrustedConnectorCallbackOrigin(origin: string, currentOrigin?:
   } catch {
     return false;
   }
-}
-
-function applyConnectorStatuses(
-  current: ConnectorDetail[],
-  statuses: ConnectorStatusResponse['statuses'],
-): ConnectorDetail[] {
-  if (!Object.keys(statuses).length) return current;
-  return current.map((connector) => {
-    const next = statuses[connector.id];
-    if (!next) return connector;
-    const { accountLabel: _accountLabel, lastError: _lastError, ...base } = connector;
-    return {
-      ...base,
-      status: next.status,
-      ...(next.accountLabel === undefined ? {} : { accountLabel: next.accountLabel }),
-      ...(next.lastError === undefined ? {} : { lastError: next.lastError }),
-    };
-  });
 }
 
 export function sortConnectorsForDisplay(connectors: ConnectorDetail[]): ConnectorDetail[] {
@@ -296,9 +274,8 @@ export function EntryView({
   const [connectors, setConnectors] = useState<ConnectorDetail[]>([]);
   const [connectorsLoading, setConnectorsLoading] = useState(false);
 
-  const reloadConnectorStatuses = useCallback(async () => {
-    const statuses = await fetchConnectorStatuses();
-    setConnectors((curr) => applyConnectorStatuses(curr, statuses));
+  const reloadConnectorCatalog = useCallback(async (options: { refreshDiscovery?: boolean } = {}) => {
+    setConnectors(await fetchConnectorCatalogSnapshot(options));
   }, []);
 
   useEffect(() => {
@@ -308,7 +285,7 @@ export function EntryView({
     // open the Settings → Connectors surface.
     setConnectorsLoading(true);
     (async () => {
-      const next = await fetchConnectors();
+      const next = await fetchConnectorCatalogSnapshot();
       if (cancelled) return;
       setConnectors(next);
       setConnectorsLoading(false);
@@ -323,11 +300,19 @@ export function EntryView({
       const data = event.data;
       if (!data || typeof data !== 'object' || (data as { type?: unknown }).type !== CONNECTOR_CALLBACK_MESSAGE_TYPE) return;
       if (!isTrustedConnectorCallbackOrigin(event.origin)) return;
-      void reloadConnectorStatuses();
+      void reloadConnectorCatalog({ refreshDiscovery: true });
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [reloadConnectorStatuses]);
+  }, [reloadConnectorCatalog]);
+
+  useEffect(() => {
+    function onConnectorsChanged() {
+      void reloadConnectorCatalog({ refreshDiscovery: true });
+    }
+    window.addEventListener(CONNECTORS_CHANGED_EVENT, onConnectorsChanged);
+    return () => window.removeEventListener(CONNECTORS_CHANGED_EVENT, onConnectorsChanged);
+  }, [reloadConnectorCatalog]);
 
   // When the OAuth flow is handed off to the user's system browser (desktop
   // shell opens connector auth URLs externally rather than in an Electron
@@ -335,12 +320,22 @@ export function EntryView({
   // Refresh connector statuses whenever the window regains focus so the UI
   // picks up a just-completed connection without manual intervention.
   useEffect(() => {
-    function onFocus() {
-      void reloadConnectorStatuses();
+    function refreshAfterReturn() {
+      void reloadConnectorCatalog({ refreshDiscovery: true });
     }
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [reloadConnectorStatuses]);
+    function onVisibilityChange() {
+      if (document.visibilityState !== 'visible') return;
+      refreshAfterReturn();
+    }
+    window.addEventListener('focus', refreshAfterReturn);
+    window.addEventListener('pageshow', refreshAfterReturn);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('focus', refreshAfterReturn);
+      window.removeEventListener('pageshow', refreshAfterReturn);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [reloadConnectorCatalog]);
 
   return (
     <EntryShell

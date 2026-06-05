@@ -24,7 +24,7 @@ import {
 } from '../analytics/events';
 import { deriveUploadCohort } from '../analytics/upload-tracking';
 import { IMAGE_MODELS } from "../media/models";
-import { projectRawUrl, uploadProjectFiles, openFolderDialog, fetchConnectors } from "../providers/registry";
+import { projectRawUrl, uploadProjectFiles, openFolderDialog } from "../providers/registry";
 import { patchProject } from "../state/projects";
 import { fetchMcpServers } from "../state/mcp";
 import type { McpServerConfig, McpTemplate } from "../state/mcp";
@@ -60,6 +60,8 @@ import { CaretFloatingLayer } from './composer/CaretFloatingLayer';
 import { ANNOTATION_EVENT, type AnnotationEventDetail } from "./PreviewDrawOverlay";
 import { SearchableModelSelect } from './modelOptions';
 import { DesignSystemSwitchPicker } from "./DesignSystemSwitchPicker";
+import { CONNECTORS_CHANGED_EVENT } from './connectors-events';
+import { fetchConnectorCatalogSnapshot } from './connectors-state';
 
 type TranslateFn = (key: keyof Dict, vars?: Record<string, string | number>) => string;
 
@@ -594,12 +596,27 @@ export const ChatComposer = forwardRef<ChatComposerHandle, Props>(
     useEffect(() => {
       if (!composerEngaged) return;
       let cancelled = false;
-      void fetchConnectors().then((rows) => {
+      void fetchConnectorCatalogSnapshot().then((rows) => {
         if (cancelled) return;
         setConnectors(rows.filter((connector) => connector.status === 'connected'));
       });
       return () => {
         cancelled = true;
+      };
+    }, [composerEngaged]);
+
+    useEffect(() => {
+      if (!composerEngaged) return;
+      let cancelled = false;
+      async function refreshConnectors() {
+        const rows = await fetchConnectorCatalogSnapshot({ refreshDiscovery: true });
+        if (cancelled) return;
+        setConnectors(rows.filter((connector) => connector.status === 'connected'));
+      }
+      window.addEventListener(CONNECTORS_CHANGED_EVENT, refreshConnectors);
+      return () => {
+        cancelled = true;
+        window.removeEventListener(CONNECTORS_CHANGED_EVENT, refreshConnectors);
       };
     }, [composerEngaged]);
 
