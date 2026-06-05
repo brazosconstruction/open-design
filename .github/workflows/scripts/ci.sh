@@ -4,7 +4,7 @@ set -Eeuo pipefail
 mode="${1:-${OD_CI_MODE:-}}"
 
 if [ -z "$mode" ]; then
-  echo "usage: $0 <probe|setup|policy|unit|typecheck|daemon|daemon-shard|daemon-parallel|web|build|browser>" >&2
+  echo "usage: $0 <probe|setup|core|policy|unit|typecheck|daemon|daemon-shard|daemon-parallel|web|build|browser>" >&2
   exit 2
 fi
 
@@ -43,7 +43,7 @@ capture_cmd() {
 
 require_mode() {
   case "$mode" in
-    probe | setup | policy | unit | typecheck | daemon | daemon-shard | daemon-parallel | web | build | browser) ;;
+    probe | setup | core | policy | unit | typecheck | daemon | daemon-shard | daemon-parallel | web | build | browser) ;;
     *)
       echo "unknown CI mode: $mode" >&2
       exit 2
@@ -239,7 +239,7 @@ e2e_vitest_seconds="0"
 playwright_critical_exit_code="0"
 playwright_critical_seconds="0"
 
-if [ "$mode" = "setup" ] || [ "$mode" = "policy" ] || [ "$mode" = "unit" ] || [ "$mode" = "typecheck" ] || [ "$mode" = "daemon" ] || [ "$mode" = "daemon-shard" ] || [ "$mode" = "daemon-parallel" ] || [ "$mode" = "web" ] || [ "$mode" = "build" ] || [ "$mode" = "browser" ]; then
+if [ "$mode" = "setup" ] || [ "$mode" = "core" ] || [ "$mode" = "policy" ] || [ "$mode" = "unit" ] || [ "$mode" = "typecheck" ] || [ "$mode" = "daemon" ] || [ "$mode" = "daemon-shard" ] || [ "$mode" = "daemon-parallel" ] || [ "$mode" = "web" ] || [ "$mode" = "build" ] || [ "$mode" = "browser" ]; then
   package_manager="$(node -p "require('./package.json').packageManager")"
   append_summary ""
   append_summary "### Corepack"
@@ -315,7 +315,7 @@ run_ci_command() {
   last_command_seconds="$seconds"
 }
 
-if [ "$mode" = "policy" ] && [ "$install_exit_code" = "0" ]; then
+if { [ "$mode" = "policy" ] || [ "$mode" = "core" ]; } && [ "$install_exit_code" = "0" ]; then
   append_summary ""
   append_summary "### Policy checks"
   append_summary ""
@@ -363,7 +363,7 @@ record_unit_result() {
   fi
 }
 
-if [ "$mode" = "unit" ] && [ "$install_exit_code" = "0" ]; then
+if { [ "$mode" = "unit" ] || [ "$mode" = "core" ]; } && [ "$install_exit_code" = "0" ]; then
   append_summary ""
   append_summary "### Workspace unit tests"
   append_summary ""

@@ -12,6 +12,7 @@ on:
           - all
           - probe
           - setup
+          - core
           - policy
           - unit
           - typecheck
@@ -55,9 +56,9 @@ jobs:
           set -euo pipefail
           case "$MODE" in
             all)
-              modes='["probe","policy","unit","typecheck","daemon","web","build","browser"]'
+              modes='["core","typecheck","daemon","web","build","browser"]'
               ;;
-            probe | setup | policy | unit | typecheck | daemon | web | build | browser)
+            probe | setup | core | policy | unit | typecheck | daemon | web | build | browser)
               modes="$(jq -nc --arg mode "$MODE" '[$mode]')"
               ;;
             *)

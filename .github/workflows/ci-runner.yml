@@ -12,6 +12,7 @@ on:
           - all
           - probe
           - setup
+          - core
           - policy
           - unit
           - typecheck
@@ -40,13 +41,88 @@ env:
   OD_CI_STEP_TIMEOUT_SECONDS: "600"
 
 jobs:
+  all_daemon_core:
+    name: Runner CI all daemon + core
+    if: ${{ inputs.mode == 'all' }}
+    runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
+    timeout-minutes: 45
+    env:
+      OD_CI_DAEMON_MAX_WORKERS: "4"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Run daemon
+        run: .github/workflows/scripts/ci.sh daemon-parallel
+
+      - name: Run core
+        run: .github/workflows/scripts/ci.sh core
+
+      - name: Upload CI manifests
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-runner-all-daemon-core-${{ github.run_id }}
+          path: .od/ci/*-manifest.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  all_browser_build:
+    name: Runner CI all browser + build
+    if: ${{ inputs.mode == 'all' }}
+    runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Run browser
+        run: .github/workflows/scripts/ci.sh browser
+
+      - name: Run build
+        run: .github/workflows/scripts/ci.sh build
+
+      - name: Upload CI manifests
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-runner-all-browser-build-${{ github.run_id }}
+          path: .od/ci/*-manifest.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  all_typecheck_web:
+    name: Runner CI all typecheck + web
+    if: ${{ inputs.mode == 'all' }}
+    runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Run typecheck
+        run: .github/workflows/scripts/ci.sh typecheck
+
+      - name: Run web
+        run: .github/workflows/scripts/ci.sh web
+
+      - name: Upload CI manifests
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-runner-all-typecheck-web-${{ github.run_id }}
+          path: .od/ci/*-manifest.json
+          if-no-files-found: warn
+          retention-days: 7
+
   probe:
     name: Runner CI probe
-    if: ${{ inputs.mode == 'all' || inputs.mode == 'probe' }}
+    if: ${{ inputs.mode == 'probe' }}
     runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
     timeout-minutes: 10
-    env:
-      OD_CI_MODE: probe
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -69,8 +145,6 @@ jobs:
     if: ${{ inputs.mode == 'setup' }}
     runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
     timeout-minutes: 30
-    env:
-      OD_CI_MODE: setup
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -88,13 +162,33 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  policy:
-    name: Runner CI policy
-    if: ${{ inputs.mode == 'all' || inputs.mode == 'policy' }}
+  core:
+    name: Runner CI core
+    if: ${{ inputs.mode == 'core' }}
     runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
     timeout-minutes: 30
-    env:
-      OD_CI_MODE: policy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Run CI script
+        run: .github/workflows/scripts/ci.sh core
+
+      - name: Upload CI manifest
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-runner-core-${{ github.run_id }}
+          path: .od/ci/*-manifest.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  policy:
+    name: Runner CI policy
+    if: ${{ inputs.mode == 'policy' }}
+    runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -114,11 +208,9 @@ jobs:
 
   unit:
     name: Runner CI unit
-    if: ${{ inputs.mode == 'all' || inputs.mode == 'unit' }}
+    if: ${{ inputs.mode == 'unit' }}
     runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
     timeout-minutes: 30
-    env:
-      OD_CI_MODE: unit
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -138,11 +230,9 @@ jobs:
 
   typecheck:
     name: Runner CI typecheck
-    if: ${{ inputs.mode == 'all' || inputs.mode == 'typecheck' }}
+    if: ${{ inputs.mode == 'typecheck' }}
     runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
     timeout-minutes: 30
-    env:
-      OD_CI_MODE: typecheck
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -162,12 +252,11 @@ jobs:
 
   daemon:
     name: Runner CI daemon
-    if: ${{ inputs.mode == 'all' || inputs.mode == 'daemon' || inputs.mode == 'daemon-parallel' }}
+    if: ${{ inputs.mode == 'daemon' || inputs.mode == 'daemon-parallel' }}
     runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
     timeout-minutes: 30
     env:
       OD_CI_DAEMON_MAX_WORKERS: "4"
-      OD_CI_MODE: daemon-parallel
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -187,11 +276,9 @@ jobs:
 
   web:
     name: Runner CI web
-    if: ${{ inputs.mode == 'all' || inputs.mode == 'web' }}
+    if: ${{ inputs.mode == 'web' }}
     runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
     timeout-minutes: 30
-    env:
-      OD_CI_MODE: web
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -211,11 +298,9 @@ jobs:
 
   build:
     name: Runner CI build
-    if: ${{ inputs.mode == 'all' || inputs.mode == 'build' }}
+    if: ${{ inputs.mode == 'build' }}
     runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
     timeout-minutes: 30
-    env:
-      OD_CI_MODE: build
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -235,11 +320,9 @@ jobs:
 
   browser:
     name: Runner CI browser
-    if: ${{ inputs.mode == 'all' || inputs.mode == 'browser' }}
+    if: ${{ inputs.mode == 'browser' }}
     runs-on: [self-hosted, Linux, ARM64, nexu-spark, open-design-ci]
     timeout-minutes: 45
-    env:
-      OD_CI_MODE: browser
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -260,8 +343,12 @@ jobs:
   gate:
     name: Runner CI gate
     needs:
+      - all_daemon_core
+      - all_browser_build
+      - all_typecheck_web
       - probe
       - setup
+      - core
       - policy
       - unit
       - typecheck
