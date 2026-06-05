@@ -4661,6 +4661,7 @@ function HtmlViewer({
   const [manualEditFrozenSource, setManualEditFrozenSource] = useState<string | null>(null);
   const [manualEditViewportWidth, setManualEditViewportWidth] = useState<number | null>(null);
   const [commentPortalHost, setCommentPortalHost] = useState<HTMLElement | null>(null);
+  const [tabPresentChromeHeight, setTabPresentChromeHeight] = useState<number | null>(null);
   const [previewBodyRef, previewBodySize] = usePreviewCanvasSize<HTMLDivElement>();
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const urlPreviewIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -6523,11 +6524,25 @@ function HtmlViewer({
 
   useEffect(() => {
     if (!inTabPresent) return;
+    const updateChromeHeight = () => {
+      const chrome = document.querySelector<HTMLElement>('.workspace-tabs-chrome.app-chrome-header');
+      const height = chrome?.getBoundingClientRect().height ?? 0;
+      setTabPresentChromeHeight(height > 0 ? Math.round(height) : null);
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setInTabPresent(false);
     };
+    updateChromeHeight();
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    window.addEventListener('resize', updateChromeHeight);
+    const chrome = document.querySelector<HTMLElement>('.workspace-tabs-chrome.app-chrome-header');
+    const observer = chrome && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateChromeHeight) : null;
+    if (observer && chrome) observer.observe(chrome);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', updateChromeHeight);
+      observer?.disconnect();
+    };
   }, [inTabPresent]);
 
   function openInNewTab() {
@@ -6787,6 +6802,7 @@ function HtmlViewer({
 
   function presentInThisTab() {
     setPresentMenuOpen(false);
+    setMode('preview');
     setInTabPresent(true);
   }
 
@@ -7887,7 +7903,7 @@ function HtmlViewer({
   ) : null;
 
   return (
-    <div className="viewer html-viewer">
+    <div className={`viewer html-viewer${inTabPresent ? ' is-tab-present' : ''}`}>
       <div className="viewer-toolbar">
         <div className="viewer-toolbar-left">
           <button
@@ -8744,11 +8760,14 @@ function HtmlViewer({
           <pre className="viewer-source">{source}</pre>
         )}
       </div>
-      {inTabPresent && source ? (
+      {inTabPresent && source && typeof document !== 'undefined' ? createPortal(
         <div
           className="present-overlay"
           role="dialog"
           aria-label={t('fileViewer.exitPresentation')}
+          style={tabPresentChromeHeight ? ({
+            '--workspace-tabs-chrome-height': `${tabPresentChromeHeight}px`,
+          } as CSSProperties) : undefined}
         >
           <button
             className="present-exit"
@@ -8772,7 +8791,8 @@ function HtmlViewer({
               srcDoc={srcDoc}
             />
           )}
-        </div>
+        </div>,
+        document.body,
       ) : null}
       {imageExportModalOpen ? (
         <div className="modal-backdrop" role="presentation">
