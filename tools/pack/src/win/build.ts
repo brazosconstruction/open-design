@@ -26,6 +26,13 @@ import {
 import { copyWinIcon, prepareResourceTree } from "./resources.js";
 import type { WinPackResult, WinPackTiming, WinPaths } from "./types.js";
 
+function logWinBuildProgress(message: string, fields: Record<string, unknown> = {}): void {
+  const suffix = Object.entries(fields)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(" ");
+  process.stderr.write(`[tools-pack win] ${message}${suffix.length === 0 ? "" : ` ${suffix}`}\n`);
+}
+
 async function writeLocalLatestYml(config: ToolPackConfig, paths: WinPaths): Promise<void> {
   if (!(await pathExists(paths.setupPath))) return;
   const packagedVersion = await readPackagedVersion(config);
@@ -59,8 +66,18 @@ export async function packWin(config: ToolPackConfig): Promise<WinPackResult> {
   const hasZipTarget = shouldBuildWinPortableZip(config.to);
   const runPhase = async <T>(phase: string, task: () => Promise<T>): Promise<T> => {
     const startedAt = Date.now();
+    logWinBuildProgress("phase:start", { phase });
     try {
-      return await task();
+      const result = await task();
+      logWinBuildProgress("phase:done", { durationMs: Date.now() - startedAt, phase });
+      return result;
+    } catch (error) {
+      logWinBuildProgress("phase:failed", {
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : String(error),
+        phase,
+      });
+      throw error;
     } finally {
       timings.push({ durationMs: Date.now() - startedAt, phase });
     }
