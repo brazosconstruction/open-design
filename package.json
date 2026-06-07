@@ -24,6 +24,11 @@
     "seed:curated-design-skills": "node --experimental-strip-types scripts/seed-curated-design-skills.ts",
     "typecheck": "pnpm -r --workspace-concurrency=4 --if-present run typecheck && tsc -p scripts/tsconfig.json --noEmit"
   },
+  "dependencies": {
+    "next": "^16.2.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
   "devDependencies": {
     "@open-design/components": "workspace:*",
     "@open-design/daemon": "workspace:*",
