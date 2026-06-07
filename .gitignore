@@ -84,3 +84,4 @@ growth/**
 
 # Vercel local project metadata contains project/org IDs; keep it local.
 .vercel
+.env*.local
