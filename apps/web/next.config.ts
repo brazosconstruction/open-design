@@ -165,6 +165,8 @@ const nextConfig: NextConfig = {
   // before packaging so source never ships inside an installer.
   productionBrowserSourceMaps: true,
   transpilePackages: ['@open-design/components'],
+  // Pin Turbopack to the workspace root so builds do not inherit unrelated
+  // parent-directory package/postcss config when the repo lives on an external drive.
   turbopack: {
     root: WORKSPACE_ROOT,
   },
