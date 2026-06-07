@@ -161,7 +161,7 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
     protocol: 'openai',
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o',
-    models: ['gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'],
+    models: ['gpt-5.5', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini'],
   },
   {
     label: 'OpenRouter',

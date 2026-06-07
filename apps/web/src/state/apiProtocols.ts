@@ -38,6 +38,7 @@ export const SUGGESTED_MODELS_BY_PROTOCOL: Record<ApiProtocol, readonly string[]
     'mimo-v2.5-pro',
   ],
   openai: [
+    'gpt-5.5',
     'gpt-4o',
     'gpt-4o-mini',
     'o3',
