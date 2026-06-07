@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  HERMES_BRIDGE_API_KEY_SENTINEL,
+  HERMES_BRIDGE_DEFAULT_MODEL,
+} from '../../src/hermesBridge';
+import {
   buildMediaProvidersForDaemonSave,
   DEFAULT_CONFIG,
   fetchMediaProvidersFromDaemon,
@@ -1009,6 +1013,56 @@ describe('loadConfig', () => {
     expect(DEFAULT_CONFIG.apiProtocol).toBe('anthropic');
     expect(DEFAULT_CONFIG.configMigrationVersion).toBe(1);
     expect(DEFAULT_CONFIG.accentColor).toBe('#c96442');
+  });
+});
+
+describe('hardwired Hermes bridge defaults', () => {
+  afterEach(() => {
+    store.clear();
+    vi.unstubAllEnvs();
+  });
+
+  it('uses managed Hermes bridge config when no local config exists', () => {
+    vi.stubEnv('NEXT_PUBLIC_OD_HERMES_BRIDGE_BASE_URL', 'https://bridge.example.com/');
+    vi.stubEnv('OD_HERMES_BRIDGE_TOKEN', 'server-secret-should-not-appear');
+
+    const config = loadConfig();
+
+    expect(config.mode).toBe('api');
+    expect(config.apiProtocol).toBe('openai');
+    expect(config.baseUrl).toBe('https://bridge.example.com');
+    expect(config.model).toBe(HERMES_BRIDGE_DEFAULT_MODEL);
+    expect(config.apiKey).toBe(HERMES_BRIDGE_API_KEY_SENTINEL);
+    expect(JSON.stringify(config)).not.toContain('server-secret-should-not-appear');
+  });
+
+  it('overrides an existing stale provider config when Hermes bridge is hardwired', () => {
+    store.set('open-design:config', JSON.stringify({
+      ...DEFAULT_CONFIG,
+      mode: 'api',
+      apiProtocol: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'old-browser-key',
+      model: 'gpt-4o',
+    }));
+    vi.stubEnv('NEXT_PUBLIC_OD_HERMES_BRIDGE_BASE_URL', 'https://bridge.example.com');
+
+    const config = loadConfig();
+
+    expect(config.mode).toBe('api');
+    expect(config.apiProtocol).toBe('openai');
+    expect(config.baseUrl).toBe('https://bridge.example.com');
+    expect(config.model).toBe(HERMES_BRIDGE_DEFAULT_MODEL);
+    expect(config.apiKey).toBe(HERMES_BRIDGE_API_KEY_SENTINEL);
+  });
+
+  it('keeps the normal defaults when no Hermes bridge URL is configured', () => {
+    const config = loadConfig();
+
+    expect(config.baseUrl).toBe(DEFAULT_CONFIG.baseUrl);
+    expect(config.model).toBe(DEFAULT_CONFIG.model);
+    expect(config.apiKey).toBe(DEFAULT_CONFIG.apiKey);
+    expect(config.apiProtocol).toBe(DEFAULT_CONFIG.apiProtocol);
   });
 });
 

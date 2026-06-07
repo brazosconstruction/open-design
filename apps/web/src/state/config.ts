@@ -1,5 +1,8 @@
 import type { AppConfigPrefs } from '@open-design/contracts';
 import { MEDIA_PROVIDERS } from '../media/models';
+import {
+  withHardwiredHermesBridgeConfig,
+} from '../hermesBridge';
 import { isOpenAICompatible } from '../providers/openai-compatible';
 import type {
   ApiProtocol,
@@ -384,12 +387,12 @@ export function loadConfig(): AppConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return {
+      return withHardwiredHermesBridgeConfig({
         ...DEFAULT_CONFIG,
         pet: normalizePet(DEFAULT_PET),
         notifications: normalizeNotifications(DEFAULT_NOTIFICATIONS),
         orbit: normalizeOrbit(DEFAULT_ORBIT),
-      };
+      });
     }
     const parsed = JSON.parse(raw) as Partial<AppConfig>;
     // Strip daemon-owned privacy fields if a stale localStorage payload
@@ -453,14 +456,14 @@ export function loadConfig(): AppConfig {
       merged.baseUrl = resolveFixedOriginBaseUrl(merged.apiProtocol, merged.baseUrl);
     }
 
-    return merged;
+    return withHardwiredHermesBridgeConfig(merged);
   } catch {
-    return {
+    return withHardwiredHermesBridgeConfig({
       ...DEFAULT_CONFIG,
       pet: normalizePet(DEFAULT_PET),
       notifications: normalizeNotifications(DEFAULT_NOTIFICATIONS),
       orbit: normalizeOrbit(DEFAULT_ORBIT),
-    };
+    });
   }
 }
 

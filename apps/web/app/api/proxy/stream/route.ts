@@ -6,6 +6,7 @@ import {
   openAiChatCompletionsUrl,
   parseJsonBody,
   redactAuthTokens,
+  resolveOpenAiProxyApiKey,
   sseResponse,
   validateExternalApiBaseUrl,
 } from '../_shared';
@@ -31,6 +32,9 @@ export async function POST(req: NextRequest) {
   }
 
   const url = openAiChatCompletionsUrl(baseUrl);
+  const resolvedApiKey = resolveOpenAiProxyApiKey(baseUrl, apiKey);
+  if (resolvedApiKey.error) return resolvedApiKey.error;
+  const upstreamApiKey = resolvedApiKey.apiKey ?? apiKey;
   const isMiMo = model.toLowerCase().startsWith('mimo');
   const payload = {
     model,
@@ -50,7 +54,7 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${upstreamApiKey}`,
         },
         body: JSON.stringify(payload),
         signal: req.signal,

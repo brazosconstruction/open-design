@@ -1,4 +1,9 @@
 import type { NextRequest } from 'next/server';
+import {
+  HERMES_BRIDGE_API_KEY_SENTINEL,
+  configuredHermesBridgeBaseUrl,
+  normalizeHermesBridgeBaseUrl,
+} from '../../../src/hermesBridge';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -85,6 +90,34 @@ export function validateExternalApiBaseUrl(baseUrl: unknown): { parsed?: URL; er
 export function openAiChatCompletionsUrl(baseUrl: string): string {
   const clean = baseUrl.replace(/\/+$/, '');
   return /\/v\d+$/.test(clean) ? `${clean}/chat/completions` : `${clean}/v1/chat/completions`;
+}
+
+export function resolveOpenAiProxyApiKey(baseUrl: string, apiKey: string): { apiKey?: string; error?: Response } {
+  if (apiKey !== HERMES_BRIDGE_API_KEY_SENTINEL) {
+    return { apiKey };
+  }
+
+  const configuredBaseUrl = configuredHermesBridgeBaseUrl();
+  if (!configuredBaseUrl) {
+    return {
+      error: jsonError(500, 'HERMES_BRIDGE_NOT_CONFIGURED', 'Managed Hermes bridge base URL is not configured'),
+    };
+  }
+
+  if (normalizeHermesBridgeBaseUrl(baseUrl) !== configuredBaseUrl) {
+    return {
+      error: jsonError(403, 'FORBIDDEN', 'Managed Hermes bridge credentials can only be used with the configured bridge URL'),
+    };
+  }
+
+  const serverToken = process.env.OD_HERMES_BRIDGE_TOKEN?.trim();
+  if (!serverToken) {
+    return {
+      error: jsonError(500, 'HERMES_BRIDGE_NOT_CONFIGURED', 'Managed Hermes bridge token is not configured'),
+    };
+  }
+
+  return { apiKey: serverToken };
 }
 
 export function anthropicMessagesUrl(baseUrl: string): string {
