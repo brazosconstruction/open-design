@@ -53,6 +53,7 @@ interface TabDragTarget {
 interface Props {
   route: Route;
   projects: Project[];
+  onCompleteOnboarding?: () => void;
 }
 
 const STORAGE_KEY = 'open-design:workspace-tabs:v1';
@@ -403,7 +404,7 @@ interface HoverPreviewState {
 
 const HOVER_PREVIEW_DELAY_MS = 380;
 
-export function WorkspaceTabsBar({ route, projects }: Props) {
+export function WorkspaceTabsBar({ route, projects, onCompleteOnboarding }: Props) {
   const t = useT();
   const [state, setState] = useState<WorkspaceTabsState>(() => initialTabsState(route));
   const [tabsMenuOpen, setTabsMenuOpen] = useState(false);
@@ -723,6 +724,9 @@ export function WorkspaceTabsBar({ route, projects }: Props) {
     // The Home tab is permanent — never close it.
     const closingTab = normalized.tabs[closingIndex]!;
     if (closingTab.kind === 'entry' && closingTab.view === 'home') return;
+    if (closingTab.kind === 'entry' && closingTab.view === 'onboarding') {
+      onCompleteOnboarding?.();
+    }
     let nextRoute: Route | null = null;
     const nextTabs = normalized.tabs.filter((tab) => tab.id !== tabId);
     let nextState: WorkspaceTabsState;

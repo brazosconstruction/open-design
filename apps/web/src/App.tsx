@@ -1986,6 +1986,7 @@ function AppInner() {
         <WorkspaceTabsBar
           route={route}
           projects={projects}
+          onCompleteOnboarding={handleCompleteOnboarding}
         />
         <div className="workspace-shell__body">
           {appMain}
