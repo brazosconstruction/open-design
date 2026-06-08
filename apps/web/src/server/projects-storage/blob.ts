@@ -1,8 +1,8 @@
 import { del as vercelDel, get as vercelGet, list as vercelList, put as vercelPut } from '@vercel/blob';
 
 import type { ChatMessage, Conversation, OpenTabsState, ProjectFile } from '../../types';
-import { createStoredFile } from './memory';
-import type { CreateProjectInput, ProjectState, ProjectsStorage, PutTextFileInput, RawFileResponse, StoredFile } from './types';
+import { createStoredBlobFile, createStoredFile } from './memory';
+import type { CreateProjectInput, ProjectState, ProjectsStorage, PutBlobFileInput, PutTextFileInput, RawFileResponse, StoredFile } from './types';
 
 type BlobListResult = { blobs: Array<{ pathname: string; url?: string; downloadUrl?: string }> };
 
@@ -216,6 +216,15 @@ export function createBlobProjectsStorage(client: BlobProjectsClient = createDef
       state.files[file.path ?? file.name] = stored;
       await save(state);
       const { content: _content, blobPathname: _blobPathname, ...meta } = stored;
+      return meta;
+    },
+    async putBlobFile(projectId, input: PutBlobFileInput) {
+      const state = await load(projectId);
+      const file = createStoredBlobFile(input);
+      if (!state || !file) return null;
+      state.files[file.path ?? file.name] = file;
+      await save(state);
+      const { content: _content, blobPathname: _blobPathname, ...meta } = file;
       return meta;
     },
     async getRawFile(projectId, path): Promise<RawFileResponse | null> {

@@ -3,8 +3,13 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { upload as uploadBlob } from '@vercel/blob/client';
 
 const trackChatPanelClickMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@vercel/blob/client', () => ({
+  upload: vi.fn(),
+}));
 
 vi.mock('../../src/analytics/events', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/analytics/events')>();
@@ -675,6 +680,16 @@ describe('ChatComposer context pickers', () => {
 
   it('clears an attachment upload error after a later retry succeeds', async () => {
     let uploadAttempts = 0;
+    vi.mocked(uploadBlob)
+      .mockRejectedValueOnce(new Error('storage offline'))
+      .mockResolvedValueOnce({
+        pathname: 'open-design/projects/project-1/files/uploads/recovered.txt',
+        url: 'https://blob.test/recovered.txt',
+        downloadUrl: 'https://blob.test/recovered.txt',
+        contentType: 'text/plain',
+        contentDisposition: 'attachment',
+        etag: 'etag-test',
+      });
     fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/mcp/servers') {
         return new Response(JSON.stringify({ servers, templates: [] }), {
@@ -694,14 +709,8 @@ describe('ChatComposer context pickers', () => {
           headers: { 'content-type': 'application/json' },
         });
       }
-      if (url === '/api/projects/project-1/upload' && init?.method === 'POST') {
+      if (url === '/api/projects/project-1/uploaded' && init?.method === 'POST') {
         uploadAttempts += 1;
-        if (uploadAttempts === 1) {
-          return new Response(JSON.stringify({ error: 'storage offline' }), {
-            status: 503,
-            headers: { 'content-type': 'application/json' },
-          });
-        }
         return new Response(JSON.stringify({
           files: [{ name: 'recovered.txt', path: 'uploads/recovered.txt', size: 24 }],
         }), {

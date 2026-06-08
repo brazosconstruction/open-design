@@ -63,6 +63,7 @@ import type {
   UpdateDeployConfigRequest,
 } from '../types';
 import type { ArtifactManifest } from '../artifacts/types';
+import { upload as uploadBlob } from '@vercel/blob/client';
 import {
   isOpenDesignHostAvailable,
   openHostExternalUrl,
@@ -1855,11 +1856,24 @@ export async function uploadProjectFile(
   }
 }
 
-// Multi-file project upload used by the chat composer's paste / drop /
-// picker. Each file lands flat in the project folder; the response is
-// reshaped into ChatAttachments so the composer can stage them without a
-// follow-up listFiles round-trip.
-const PROJECT_UPLOAD_BATCH_SIZE = 12;
+// Direct browser-to-Blob project upload used by the chat composer's paste / drop /
+// picker. This bypasses Vercel serverless request body limits, then registers
+// stored blob metadata back into project state so attachments are durable.
+
+function sanitizeUploadSegment(value: string): string {
+  const cleaned = value.replace(/^\/+/, '').replace(/\.\./g, '').replace(/[\\/]+/g, '-').trim();
+  return cleaned || 'upload.bin';
+}
+
+function buildUploadRelativePath(file: File, dir?: string): string {
+  const name = sanitizeUploadSegment(file.name || 'upload.bin');
+  const prefix = dir?.trim() ? `${dir.trim().replace(/^\/+/, '').replace(/\.\./g, '').replace(/\/+$/g, '')}/` : 'uploads/';
+  return `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${name}`;
+}
+
+function blobPathnameForProjectFile(projectId: string, path: string): string {
+  return `open-design/projects/${encodeURIComponent(projectId)}/files/${path}`;
+}
 
 export interface ProjectUploadFailure {
   name: string;
@@ -1883,69 +1897,54 @@ export async function uploadProjectFiles(
   const uploaded: ChatAttachment[] = [];
   const failed: ProjectUploadFailure[] = [];
   let error: string | undefined;
-  const targetDir = dir?.trim() ?? '';
 
-  for (let i = 0; i < files.length; i += PROJECT_UPLOAD_BATCH_SIZE) {
-    const batch = files.slice(i, i + PROJECT_UPLOAD_BATCH_SIZE);
-    const remaining = files.slice(i + PROJECT_UPLOAD_BATCH_SIZE);
-    const form = new FormData();
-    // The `dir` field MUST be appended before the file parts: the daemon's
-    // multer destination resolver reads req.body.dir as each file streams in,
-    // and busboy only exposes fields parsed earlier in the multipart body.
-    if (targetDir) form.append('dir', targetDir);
-    for (const f of batch) form.append('files', f);
-
+  for (const file of files) {
+    const path = buildUploadRelativePath(file, dir);
+    const blobPathname = blobPathnameForProjectFile(projectId, path);
     try {
-      const resp = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/upload`,
-        { method: 'POST', body: form },
-      );
-
+      const blob = await uploadBlob(blobPathname, file, {
+        access: 'private',
+        multipart: true,
+        handleUploadUrl: `/api/projects/${encodeURIComponent(projectId)}/upload-token`,
+        contentType: file.type || undefined,
+      });
+      const resp = await fetch(`/api/projects/${encodeURIComponent(projectId)}/uploaded`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: [{
+            name: file.name,
+            path,
+            size: file.size,
+            mime: file.type || undefined,
+            blobPathname: blob.pathname,
+          }],
+        }),
+      });
       if (!resp.ok) {
-        const payload = (await resp.json().catch(() => null)) as
-          | { code?: string; error?: string }
-          | null;
-        error = payload?.error ?? `upload failed (${resp.status})`;
-        for (const f of batch) {
-          failed.push({ name: f.name, code: payload?.code, error: error });
-        }
-        for (const f of remaining) {
-          failed.push({ name: f.name, code: payload?.code, error: error });
-        }
-        break;
+        const payload = (await resp.json().catch(() => null)) as { code?: string; error?: string } | null;
+        error = payload?.error ?? `upload registration failed (${resp.status})`;
+        failed.push({ name: file.name, code: payload?.code, error });
+        continue;
       }
-
       const json = (await resp.json()) as {
         files: { name: string; path: string; size?: number; originalName?: string }[];
       };
-      const responseFiles = json.files ?? [];
-      uploaded.push(
-        ...responseFiles.map((f) => ({
-          path: f.path,
-          name: f.originalName ?? f.name,
-          kind: looksLikeImage(f.name) ? ('image' as const) : ('file' as const),
-          size: f.size,
-        })),
-      );
-      // Server preserves request order; any dropped files are unmatched at the batch tail.
-      if (responseFiles.length < batch.length) {
-        error ??= 'some files could not be stored';
-        for (const f of batch.slice(responseFiles.length)) {
-          failed.push({
-            name: f.name,
-            error: error ?? 'some files could not be stored',
-          });
-        }
+      const stored = json.files?.[0];
+      if (!stored) {
+        error = 'upload registration failed';
+        failed.push({ name: file.name, error });
+        continue;
       }
-    } catch {
-      error = 'upload request failed';
-      for (const f of batch) {
-        failed.push({ name: f.name, error });
-      }
-      for (const f of remaining) {
-        failed.push({ name: f.name, error });
-      }
-      break;
+      uploaded.push({
+        path: stored.path,
+        name: stored.originalName ?? stored.name ?? file.name,
+        kind: looksLikeImage(stored.path) ? 'image' : 'file',
+        size: stored.size ?? file.size,
+      });
+    } catch (err) {
+      error = err instanceof Error ? err.message : 'upload request failed';
+      failed.push({ name: file.name, error });
     }
   }
 

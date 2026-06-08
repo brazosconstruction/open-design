@@ -1,5 +1,5 @@
 import type { ChatMessage, Conversation, OpenTabsState, Project, ProjectFile } from '../../types';
-import type { CreateProjectInput, ProjectState, ProjectsStorage, PutTextFileInput, RawFileResponse, StoredFile } from './types';
+import type { CreateProjectInput, ProjectState, ProjectsStorage, PutBlobFileInput, PutTextFileInput, RawFileResponse, StoredFile } from './types';
 
 function now() { return Date.now(); }
 
@@ -43,6 +43,24 @@ export function createStoredFile(input: PutTextFileInput): StoredFile | null {
     mime: mimeFor(name),
     artifactManifest: input.artifactManifest,
     content: input.content,
+  };
+}
+
+export function createStoredBlobFile(input: PutBlobFileInput): StoredFile | null {
+  const name = sanitizeName(input.name);
+  const path = sanitizeName(input.path ?? input.name);
+  const blobPathname = sanitizeName(input.blobPathname);
+  if (!name || !path || !blobPathname) return null;
+  const timestamp = now();
+  return {
+    name,
+    path,
+    type: 'file',
+    size: typeof input.size === 'number' && Number.isFinite(input.size) ? input.size : 0,
+    mtime: timestamp,
+    kind: fileKind(path),
+    mime: typeof input.mime === 'string' && input.mime.trim() ? input.mime.trim() : mimeFor(path),
+    blobPathname,
   };
 }
 
@@ -155,6 +173,14 @@ export function createMemoryProjectsStorage(): ProjectsStorage {
     async putTextFile(projectId, input) {
       const entry = state(projectId);
       const file = createStoredFile(input);
+      if (!entry || !file) return null;
+      entry.files[file.path ?? file.name] = file;
+      const { content: _content, blobPathname: _blobPathname, ...meta } = file;
+      return meta;
+    },
+    async putBlobFile(projectId, input) {
+      const entry = state(projectId);
+      const file = createStoredBlobFile(input);
       if (!entry || !file) return null;
       entry.files[file.path ?? file.name] = file;
       const { content: _content, blobPathname: _blobPathname, ...meta } = file;

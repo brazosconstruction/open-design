@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installMockOpenDesignHost } from '@open-design/host/testing';
+import { upload as uploadBlob } from '@vercel/blob/client';
+
+vi.mock('@vercel/blob/client', () => ({
+  upload: vi.fn(),
+}));
 
 import {
   cancelConnectorAuthorization,
@@ -754,6 +759,14 @@ describe('uploadProjectFiles', () => {
     const composed = '测试.pdf';
     const decomposed = '测试.pdf'; // pretend the server returned a normalized variant
     const file = new File(['hello'], composed, { type: 'application/pdf' });
+    vi.mocked(uploadBlob).mockResolvedValue({
+      pathname: 'open-design/projects/project-1/files/uploads/test.pdf',
+      url: 'https://blob.test/test.pdf',
+      downloadUrl: 'https://blob.test/test.pdf',
+      contentType: 'application/pdf',
+      contentDisposition: 'attachment',
+      etag: 'etag-test',
+    });
 
     vi.stubGlobal(
       'fetch',
@@ -778,21 +791,38 @@ describe('uploadProjectFiles', () => {
       name: decomposed,
       size: 5,
     });
+    expect(uploadBlob).toHaveBeenCalledWith(
+      expect.stringMatching(/^open-design\/projects\/project-1\/files\/uploads\//),
+      file,
+      expect.objectContaining({ multipart: true, handleUploadUrl: '/api/projects/project-1/upload-token' }),
+    );
   });
 
   it('marks the unmatched tail as failed when the server drops files mid-flight', async () => {
     const a = new File(['a'], 'a.txt', { type: 'text/plain' });
     const b = new File(['b'], 'b.txt', { type: 'text/plain' });
     const c = new File(['c'], 'c.txt', { type: 'text/plain' });
+    vi.mocked(uploadBlob).mockResolvedValue({
+      pathname: 'open-design/projects/project-1/files/uploads/test.txt',
+      url: 'https://blob.test/test.txt',
+      downloadUrl: 'https://blob.test/test.txt',
+      contentType: 'text/plain',
+      contentDisposition: 'attachment',
+      etag: 'etag-test',
+    });
 
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(JSON.stringify({
-        files: [
-          { name: 't1-a.txt', path: 't1-a.txt', size: 1, originalName: 'a.txt' },
-          { name: 't2-b.txt', path: 't2-b.txt', size: 1, originalName: 'b.txt' },
-        ],
-      }), { status: 200 })),
+      vi.fn(async (_url, init) => {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { files?: Array<{ name?: string }> };
+        if (body.files?.[0]?.name === 'c.txt') {
+          return new Response(JSON.stringify({ files: [] }), { status: 200 });
+        }
+        const name = body.files?.[0]?.name ?? 'file.txt';
+        return new Response(JSON.stringify({
+          files: [{ name, path: name, size: 1, originalName: name }],
+        }), { status: 200 });
+      }),
     );
 
     const result = await uploadProjectFiles('project-1', [a, b, c]);

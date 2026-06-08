@@ -17,6 +17,14 @@ export interface PutTextFileInput {
   artifactManifest?: ProjectFile['artifactManifest'];
 }
 
+export interface PutBlobFileInput {
+  name: string;
+  path?: string;
+  size?: number;
+  mime?: string;
+  blobPathname: string;
+}
+
 export interface RawFileResponse {
   response: Response;
   mime: string;
@@ -40,6 +48,7 @@ export interface ProjectsStorage {
   putTabs(projectId: string, state: OpenTabsState): Promise<OpenTabsState>;
   listFiles(projectId: string): Promise<ProjectFile[]>;
   putTextFile(projectId: string, input: PutTextFileInput): Promise<ProjectFile | null>;
+  putBlobFile(projectId: string, input: PutBlobFileInput): Promise<ProjectFile | null>;
   getRawFile(projectId: string, path: string): Promise<RawFileResponse | null>;
   deleteRawFile(projectId: string, path: string): Promise<boolean>;
 }

@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 
 import { getProjectsStorage } from '../../../../src/server/projects-storage';
 import { sanitizeName } from '../../../../src/server/projects-storage/memory';
@@ -20,6 +21,17 @@ function splitParams(params: { path?: string[] }) {
 
 function rawName(parts: Array<string | undefined>) {
   return decodeURIComponent(parts.filter(Boolean).join('/'));
+}
+
+function filesPrefix(projectId: string) {
+  return `open-design/projects/${encodeURIComponent(projectId)}/files/`;
+}
+
+function normalizeRegisteredFiles(value: unknown) {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as { files?: unknown }).files)) return [];
+  return (value as { files: unknown[] }).files
+    .map((item) => item && typeof item === 'object' ? item as Record<string, unknown> : null)
+    .filter((item): item is Record<string, unknown> => item !== null);
 }
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ path?: string[] }> }) {
@@ -51,11 +63,32 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ path?: str
 export async function POST(req: NextRequest, ctx: { params: Promise<{ path?: string[] }> }) {
   const storage = getProjectsStorage();
   const parts = splitParams(await ctx.params);
-  const data = await body(req) ?? {};
-  if (parts.length === 0) return json(await storage.createProject(data));
+  if (parts.length === 0) return json(await storage.createProject(await body(req) ?? {}));
 
   const [projectId, section] = parts;
   if (!projectId || !(await storage.getProject(projectId))) return notFound();
+  if (section === 'upload-token') {
+    const uploadBody = (await req.json().catch(() => null)) as HandleUploadBody | null;
+    if (!uploadBody) return badRequest('upload token request is invalid');
+    const prefix = filesPrefix(projectId);
+    const result = await handleUpload({
+      request: req,
+      body: uploadBody,
+      onBeforeGenerateToken: async (pathname) => {
+        if (!pathname.startsWith(prefix)) throw new Error('upload pathname is outside this project');
+        const relativePath = pathname.slice(prefix.length);
+        if (!sanitizeName(decodeURIComponent(relativePath))) throw new Error('upload pathname is invalid');
+        return {
+          maximumSizeInBytes: 250 * 1024 * 1024,
+          validUntil: Date.now() + 10 * 60 * 1000,
+          addRandomSuffix: false,
+          allowOverwrite: true,
+        };
+      },
+    });
+    return json(result);
+  }
+  const data = await body(req) ?? {};
   if (section === 'conversations') {
     const conversation = await storage.createConversation(projectId, typeof data.title === 'string' ? data.title : null);
     return conversation ? json({ conversation }) : notFound();
@@ -70,7 +103,23 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path?: str
     });
     return file ? json({ file }) : notFound();
   }
-  if (section === 'upload') return badRequest('uploads are not available in Vercel storage mode yet');
+  if (section === 'uploaded') {
+    const prefix = filesPrefix(projectId);
+    const files = await Promise.all(normalizeRegisteredFiles(data).map(async (item) => {
+      const path = sanitizeName(item.path);
+      const blobPathname = sanitizeName(item.blobPathname);
+      if (!path || !blobPathname || !blobPathname.startsWith(prefix)) return null;
+      return storage.putBlobFile(projectId, {
+        name: typeof item.name === 'string' && item.name.trim() ? item.name : path.split('/').pop() ?? path,
+        path,
+        size: typeof item.size === 'number' && Number.isFinite(item.size) ? item.size : undefined,
+        mime: typeof item.mime === 'string' ? item.mime : undefined,
+        blobPathname,
+      });
+    }));
+    return json({ files: files.filter(Boolean) });
+  }
+  if (section === 'upload') return badRequest('uploads must use direct blob upload in Vercel storage mode');
   if (section === 'deploy') return badRequest('deploy is not available in Vercel storage mode yet');
   return notFound();
 }
